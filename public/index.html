@@ -525,7 +525,41 @@ function editStaffAdmin(uid){var p=people().find(function(x){return x.uid===uid}
 function createStaffLogin(uid){var person=people().find(function(x){return x.uid===uid});if(!person)return toast('Staff record not found');profilePage($('main'),'Staff',person);}
 function resetStaffPassword(uid){var person=people().find(function(x){return x.uid===uid});if(!person)return toast('Staff record not found');var a=users();var u=a.find(function(x){return x.uid===uid&&String(x.role||'').toLowerCase()==='staff';});if(!u)return toast('No Staff login exists. Edit the Staff record to create one.');var p=prompt('Enter new password (minimum 4 characters):','');if(p===null)return;if(p.length<4)return toast('Password must be at least 4 characters.');u.password=p;if(storeSet('rcs_users',a))toast('Staff password updated.');}
 function pauseStaff(uid){var a=people();var p=a.find(function(x){return x.uid===uid});if(!p)return toast('Staff record not found');p.paused=!p.paused;savePeople(a);var ua=users();ua.forEach(function(u){if(u&&u.uid===uid&&String(u.role||'').toLowerCase()==='staff')u.active=!p.paused;});storeSet('rcs_users',ua);adminStaffPage($('main'));toast(p.paused?'Staff account paused.':'Staff account resumed.');}
-async function deleteStaff(uid){var p=people().find(function(x){return x.uid===uid});if(!p)return toast('Staff record not found');if(!confirm('Delete '+(p.name||'this staff')+'? This removes the Staff record and login account.'))return;var token=cloudToken();if(!token)return toast('Your Admin session has expired. Please log in again.');try{var r=await fetch(CAC_API_BASE+'/api/staff/'+encodeURIComponent(uid),{method:'DELETE',headers:cloudHeaders()});var x=await r.json().catch(function(){return {}});if(r.status===401){try{localStorage.removeItem('anrem_cloud_token')}catch(e){};return toast('Session expired. Please log in again.')}if(!r.ok)throw new Error(x.error||'Unable to delete Staff');if(x.state)applyCloudState(x.state);adminStaffPage($('main'));toast('Staff record deleted; attendance history preserved.')}catch(e){console.error(e);toast(e.message||'Unable to delete Staff. Please check your connection.')}}
+async function deleteStaff(uid){
+var p=people().find(function(x){return x.uid===uid});
+if(!p)return toast('Staff record not found');
+
+if(!confirm('Delete '+(p.name||'this staff')+'? This removes the Staff record and login account.'))return;
+
+var token=cloudToken();
+if(!token)return toast('Your Admin session has expired. Please log in again.');
+
+try{
+var r=await fetch(CAC_API_BASE+'/api/staff/'+encodeURIComponent(uid),{
+method:'DELETE',
+headers:cloudHeaders()
+});
+
+var x=await r.json().catch(function(){return {}});
+
+if(r.status===401){
+try{localStorage.removeItem('anrem_cloud_token')}catch(e){}
+return toast('Session expired. Please log in again.');
+}
+
+if(!r.ok)throw new Error(x.error||'Unable to delete Staff');
+
+if(x.state)applyCloudState(x.state);
+
+adminStaffPage($('main'));
+
+toast('Staff record deleted; attendance history preserved.');
+
+}catch(e){
+console.error(e);
+toast(e.message||'Unable to delete Staff. Please check your connection.');
+}
+}
 function viewStaffAttendance(uid){var r=att().filter(function(x){return x.uid===uid});var m=$('main');m.innerHTML='<div class="card"><h2>Attendance History</h2><button onclick="adminStaffPage($(\'main\'))">Back</button><div class="tablewrap"><table><tr><th>Date</th><th>Time</th><th>Action</th></tr>'+r.map(function(x){return '<tr><td>'+esc(x.date||'')+'</td><td>'+esc(x.time||'')+'</td><td>'+esc(x.session||x.type||x.action||'')+'</td></tr>'}).join('')+'</table></div></div>';}
 </script><script>
 (function(){
