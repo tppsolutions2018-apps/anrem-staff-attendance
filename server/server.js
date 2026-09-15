@@ -119,6 +119,7 @@ const app=express();
 app.set('trust proxy',1);
 app.use(helmet({contentSecurityPolicy:false}));
 app.use(express.json({limit:'20mb'}));
+app.use(express.static(path.join(__dirname,'..','public')));
 app.get('/api/health',async(req,res)=>{try{await pool.query('SELECT 1');res.json({ok:true,service:'ANREM Staff Attendance',database:'postgres',time:new Date().toISOString()})}catch(e){res.status(503).json({ok:false,error:'Database unavailable'})}});
 app.post('/api/login',async(req,res)=>{
   try{
