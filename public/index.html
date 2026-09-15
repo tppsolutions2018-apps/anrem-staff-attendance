@@ -420,18 +420,25 @@ function editUser(i){
 async function delUser(i){
 var a=users(),u=a[i];
 if(!u)return;
-if(String(u.username||'').toLowerCase()==='admin')return toast('Default admin cannot be deleted');
+if(String(u.username||'').toLowerCase()==='admin')
+return toast('Default admin cannot be deleted');
+
 if(u.staffOnly&&u.uid){
 return deleteStaff(u.uid);
 }
+
 if(!confirm('Delete this user account?'))return;
+
 a.splice(i,1);
 cacheSet('rcs_users',a);
+
 var ok=await cloudPush('rcs_users',a,false);
+
 if(!ok){
 toast('User was removed on this device, but cloud deletion failed. Please retry.');
 return;
 }
+
 settings($('main'));
 toast('User account deleted.');
 }
