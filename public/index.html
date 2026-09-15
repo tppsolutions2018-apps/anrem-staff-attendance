@@ -417,7 +417,24 @@ function editUser(i){
   cacheSet('rcs_users',a);settings(m);toast('User updated successfully');
  };
 }
-async function delUser(i){var a=users(),u=a[i];if(!u)return;if(String(u.username||'').toLowerCase()==='admin')return toast('Default admin cannot be deleted');if(!confirm('Delete this user account?'))return;a.splice(i,1);cacheSet('rcs_users',a);var ok=await cloudPush('rcs_users',a,false);if(!ok){toast('User was removed on this device, but cloud deletion failed. Please retry.');return;}settings($('main'));toast('User account deleted.');}
+async function delUser(i){
+var a=users(),u=a[i];
+if(!u)return;
+if(String(u.username||'').toLowerCase()==='admin')return toast('Default admin cannot be deleted');
+if(u.staffOnly&&u.uid){
+return deleteStaff(u.uid);
+}
+if(!confirm('Delete this user account?'))return;
+a.splice(i,1);
+cacheSet('rcs_users',a);
+var ok=await cloudPush('rcs_users',a,false);
+if(!ok){
+toast('User was removed on this device, but cloud deletion failed. Please retry.');
+return;
+}
+settings($('main'));
+toast('User account deleted.');
+}
 function changePass(){var p1=$('myNewPass').value.trim(),p2=$('myNewPass2').value.trim();if(!p1||p1!==p2)return toast('Passwords do not match');var a=users(),u=a.find(function(x){return x.username===currentUser.username});if(u){u.password=p1;storeSet('rcs_users',a);currentUser=u;toast('Password changed')}}
 function download(name,text,mime){var blob=new Blob([text],{type:mime||'text/csv'});var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},500)}
 
