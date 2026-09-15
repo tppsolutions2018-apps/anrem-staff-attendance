@@ -233,7 +233,10 @@ async function saveProfile(role,old){
      created=latestPeople[pi];
     }
     var ua=users();
-    var duplicate=ua.find(function(u){return String(u.username||'').trim().toLowerCase()===staffUsername && (!old || u.uid!==created.uid);});
+    var duplicate=ua.find(function(u){
+ return String(u.username||'').trim().toLowerCase()===staffUsername &&
+        String(u.uid||'')!==String(created.uid||'');
+});
     if(duplicate){toast('Staff username already exists. Choose another username.');if(btn){btn.disabled=false;btn.textContent=old?'Save Edit':'Save and Create ID';}return;}
     var linked=ua.find(function(u){return u.uid===created.uid;});
     if(!linked && old){linked=ua.find(function(u){return String(u.username||'').trim().toLowerCase()===String(old.uid||'').toLowerCase();});}
