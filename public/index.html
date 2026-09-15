@@ -102,9 +102,9 @@ async function login(){
    var staff=people().find(function(x){return x&&String(x.role||'').toLowerCase()==='staff'&&(String(x.uid||'').toLowerCase()===String(found.uid||'').toLowerCase()||String(x.uid||'').toLowerCase()===String(found.username||'').toLowerCase())});
    if(staff&&staff.paused){toast('This staff account is paused. Contact Admin.');return false;}
   }
-  currentUser=found;$('login').classList.add('hide');$('app').classList.remove('hide');$('who').textContent=found.name+' ('+found.role+')';makeTabs();nav(found.role==='Staff'?'clock':'dash');return false;
+  currentUser=found;cacheSet('anrem_current_user',found);$('login').classList.add('hide');$('app').classList.remove('hide');$('who').textContent=found.name+' ('+found.role+')';makeTabs();nav(found.role==='Staff'?'clock':'dash');return false;
  }
-function logout(){stopScan();currentUser=null;try{localStorage.removeItem('anrem_cloud_token')}catch(e){}$('app').classList.add('hide');$('login').classList.remove('hide')}
+function logout(){stopScan();currentUser=null;try{localStorage.removeItem('anrem_current_user')}catch(e){}try{localStorage.removeItem('anrem_current_user')}catch(e){}try{localStorage.removeItem('anrem_cloud_token')}catch(e){}$('app').classList.add('hide');$('login').classList.remove('hide')}
 var pages=[['dash','Dashboard'],['staff','Create Staff ID Card'],['scanStaff','Scan Staff'],['staffRecords','Staff Records'],['clock','Staff Clock In/Out'],['reports','Reports'],['settings','Settings']];
 function isStaffSession(){return !!currentUser&&currentUser.role==='Staff';}
 function makeTabs(){
@@ -432,7 +432,29 @@ function clockPage(m){
  $('clockIn').onclick=function(){var a=att(),t=timeNow();a.push({date:today(),time:t,uid:registered.uid,name:registered.name,role:'Staff',classDept:registered.classDept||'',session:'Clock In',status:'Present',scanner:'Self'});if(saveAtt(a)){toast('Clock In saved');clockPage($('main'));}};
  $('clockOut').onclick=function(){var a=att(),day=a.filter(function(r){return r.uid===registered.uid&&r.date===today()}),last=day.length?day[day.length-1]:null;if(last&&last.session==='Clock In'){var t=timeNow();a.push({date:today(),time:t,uid:registered.uid,name:registered.name,role:'Staff',classDept:registered.classDept||'',session:'Clock Out',status:'Present',scanner:'Self'});if(saveAtt(a)){toast('Clock Out saved');clockPage($('main'));}}else toast('Clock In first before Clock Out.');};
 }
-function init(){users();$('loginForm').onsubmit=function(e){e.preventDefault();return login()};$('loginBtn').onclick=function(e){e.preventDefault();return login()};$('eyeBtn').onclick=function(){var p=$('loginPass');p.type=p.type==='password'?'text':'password'};$('logoutBtn').onclick=logout;$('loginPass').addEventListener('keydown',function(e){if(e.key==='Enter')login()})}
+async function restoreSession(){
+try{
+var token=cloudToken();
+var saved=storeGet('anrem_current_user',null);
+if(!token||!saved)return false;
+var r=await fetch(CAC_API_BASE+'/api/state',{headers:cloudHeaders()});
+if(!r.ok)throw new Error('Session expired');
+var x=await r.json();
+applyCloudState(x);
+currentUser=saved;
+$('login').classList.add('hide');
+$('app').classList.remove('hide');
+$('who').textContent=saved.name+' ('+saved.role+')';
+makeTabs();
+nav(saved.role==='Staff'?'clock':'dash');
+return true;
+}catch(e){
+try{localStorage.removeItem('anrem_cloud_token');localStorage.removeItem('anrem_current_user')}catch(_){}
+return false;
+}
+}
+
+function init(){users();restoreSession();$('loginForm').onsubmit=function(e){e.preventDefault();return login()};$('loginBtn').onclick=function(e){e.preventDefault();return login()};$('eyeBtn').onclick=function(){var p=$('loginPass');p.type=p.type==='password'?'text':'password'};$('logoutBtn').onclick=logout;$('loginPass').addEventListener('keydown',function(e){if(e.key==='Enter')login()})}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
 })();
 </script>
