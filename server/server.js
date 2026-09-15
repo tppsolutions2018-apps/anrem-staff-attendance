@@ -203,6 +203,6 @@ app.get('/api/export',auth,adminOnly,async(req,res)=>{
     res.setHeader('Content-Type','application/json');res.setHeader('Content-Disposition','attachment; filename="anrem-staff-attendance-backup.json"');res.send(JSON.stringify(payload,null,2));
   }catch(e){console.error(e);res.status(500).json({error:'Unable to export backup'})}
 });
-app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'..','public','index.html')));
+app.use((req,res)=>res.sendFile(path.join(__dirname,'..','public','index.html')));
 
 init().then(()=>app.listen(PORT,'0.0.0.0',()=>console.log(`ANREM Staff Attendance running on port ${PORT}`))).catch(e=>{console.error('Startup failed',e);process.exit(1)});
