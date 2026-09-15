@@ -1,0 +1,9 @@
+{
+  "name": "ANREM Staff Attendance",
+  "short_name": "ANREM Attendance",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#241075",
+  "icons": [{"src":"/logo.png","sizes":"512x512","type":"image/png","purpose":"any"}]
+}
