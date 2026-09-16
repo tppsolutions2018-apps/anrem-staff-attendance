@@ -160,23 +160,52 @@ app.delete('/api/staff/:uid',auth,adminOnly,async(req,res)=>{
     res.status(500).json({error:'Unable to delete Staff'});
   }finally{client.release()}
 });
-app.post('/api/snapshot/:key',auth,adminOnly,async(req,res)=>{
+app.post('/api/snapshot/:key',auth,async(req,res)=>{
   try{
     const key=req.params.key;
-    if(!['rcs_people','rcs_users','rcs_greports'].includes(key))return res.status(400).json({error:'Invalid key'});
     const value=Array.isArray(req.body.value)?req.body.value:[];
+
+    if(key==='anrem_daily_reports'){
+      const incoming=value.filter(r=>r&&String(r.uid||'')===String(req.user.uid||''));
+
+      if(req.user.role==='Admin'){
+        await saveSnapshot(key,value);
+      }else{
+        const existing=await getSnapshot(key,[]);
+        const others=(Array.isArray(existing)?existing:[])
+          .filter(r=>r&&String(r.uid||'')!==String(req.user.uid||''));
+
+        await saveSnapshot(key,others.concat(incoming));
+      }
+
+      return res.json({
+        ok:true,
+        state:await sanitizeStateFor(req.user)
+      });
+    }
+
+    if(!['rcs_people','rcs_users','rcs_greports'].includes(key)){
+      return res.status(400).json({error:'Invalid key'});
+    }
+
+    if(req.user.role!=='Admin'){
+      return res.status(403).json({error:'Admin only'});
+    }
+
     await saveSnapshot(key,value);
-    if(key==='rcs_users')await syncAuthFromUsers(value);
-    res.json({ok:true,state:await sanitizeStateFor(req.user)});
-  }catch(e){console.error(e);res.status(500).json({error:'Unable to save data'})}
-});
-app.post('/api/attendance/sync',auth,async(req,res)=>{
-  try{
-    const incoming=Array.isArray(req.body.value)?req.body.value:[];
-    const allowed=req.user.role==='Admin'?incoming:incoming.filter(r=>r&&String(r.uid||'')===String(req.user.uid||''));
-    await upsertAttendance(allowed);
-    res.json({ok:true,state:await sanitizeStateFor(req.user)});
-  }catch(e){console.error(e);res.status(500).json({error:'Unable to sync attendance'})}
+
+    if(key==='rcs_users'){
+      await syncAuthFromUsers(value);
+    }
+
+    res.json({
+      ok:true,
+      state:await sanitizeStateFor(req.user)
+    });
+  }catch(e){
+    console.error(e);
+    res.status(500).json({error:'Unable to save data'})
+  }
 });
 app.put('/api/attendance/:id',auth,adminOnly,async(req,res)=>{
   try{
