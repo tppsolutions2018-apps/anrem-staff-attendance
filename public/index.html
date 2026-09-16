@@ -105,12 +105,12 @@ async function login(){
   currentUser=found;cacheSet('anrem_current_user',found);$('login').classList.add('hide');$('app').classList.remove('hide');$('who').textContent=found.name+' ('+found.role+')';makeTabs();nav(found.role==='Staff'?'clock':'dash');return false;
  }
 function logout(){stopScan();currentUser=null;try{localStorage.removeItem('anrem_current_user')}catch(e){}try{localStorage.removeItem('anrem_current_user')}catch(e){}try{localStorage.removeItem('anrem_cloud_token')}catch(e){}$('app').classList.add('hide');$('login').classList.remove('hide')}
-var pages=[['dash','Dashboard'],['staff','Create Staff ID Card'],['scanStaff','Scan Staff'],['staffRecords','Staff Records'],['clock','Staff Clock In/Out'],['reports','Reports'],['settings','Settings']];
+var pages=[['dash','Dashboard'],['staff','Create Staff ID Card'],['scanStaff','Scan Staff'],['staffRecords','Staff Records'],['clock','Staff Clock In/Out'],['dailyReport','Daily Activities Report'],['reports','Reports'],['settings','Settings']];
 function isStaffSession(){return !!currentUser&&currentUser.role==='Staff';}
 function makeTabs(){
  var h='';
  pages.forEach(function(p){
-  if(!isStaffSession()||p[0]==='clock')h+='<button type="button" data-page="'+p[0]+'">'+p[1]+'</button>';
+  if(!isStaffSession()||p[0]==='clock'||p[0]==='dailyReport')h+='<button type="button" data-page="'+p[0]+'">'+p[1]+'</button> ';
  });
  $('tabs').innerHTML=h;
  Array.prototype.forEach.call($('tabs').querySelectorAll('button'),function(b){
@@ -119,7 +119,7 @@ function makeTabs(){
 }
 function nav(p){
  stopScan();
- if(isStaffSession()&&p!=='clock'){p='clock';}
+ if(isStaffSession()&&p!=='clock'&&p!=='dailyReport'){p='clock';}
  Array.prototype.forEach.call($('tabs').querySelectorAll('button'),function(b){b.classList.toggle('active',b.getAttribute('data-page')===p)});
  var m=$('main');
  if(p==='dash')dash(m);
@@ -127,6 +127,7 @@ function nav(p){
  if(p==='scanStaff')scanPage(m,'Staff');
  if(p==='staffRecords')recordsPage(m,'Staff',false);
  if(p==='clock')clockPage(m);
+ if(p==='dailyReport')dailyActivitiesPage(m);
  if(p==='reports')reportsHub(m);
  if(p==='settings')settings(m);
 }
@@ -134,7 +135,7 @@ function bindGo(m){Array.prototype.forEach.call(m.querySelectorAll('[data-go]'),
 function count(role,session){var s={};att().filter(function(r){return r.date===today()&&r.role===role&&(!session||r.session===session)}).forEach(function(r){s[r.uid]=1});return Object.keys(s).length}
 function dash(m){var ps=people(),ft=ps.filter(function(p){return p.role==='Staff'}).length;m.innerHTML='<div class="grid"><div class="card stat"><p>Staff Present</p><h2>'+count('Staff')+'</h2></div><div class="card stat"><p>Staff Absent</p><h2>'+Math.max(0,ft-count('Staff'))+'</h2></div></div><br><div class="card"><h2>Today Staff Attendance Summary</h2><div class="grid"><div class="card"><b>Work Start</b><p>Staff: '+count('Staff','Work Start')+'</p></div><div class="card"><b>Work Finish</b><p>Staff: '+count('Staff','Work Finish')+'</p></div></div></div><br><div class="card"><h2>Staff Module</h2><div class="row"><button data-go="staff">Register / Edit Staff</button><button class="green" data-go="scanStaff">Scan Staff Attendance</button><button class="light" data-go="staffRecords">Staff Records</button></div></div><br><div class="card"><h2>Reports</h2><button class="red" data-go="reports">Open Reports</button></div>';bindGo(m)}
 function nextId(role){return (role==='Student'?'ANREM-STU-':'ANREM-STF-')+String(Date.now()).slice(-6)}
-function profilePage(m,role,item){editingUid=item?item.uid:null;var cd=role==='Student'?'Class':'Assignment',list=people().filter(function(p){return normRole(p.role)===role});m.innerHTML='<div class="card"><h2>'+role+' Profile Management</h2><div class="formgrid"><div><label>Name</label><input id="pName" value="'+esc(item?item.name:'')+'"></div><div><label>'+cd+'</label>'+(role==='Student'?'<input id="pClass" value="'+esc(item?item.classDept:'')+'">':'<select id="pClass"><option>Assistant Pastor</option><option>Director of Evangelism</option><option>Youth Pastor</option><option>Field Evangelist</option><option>Assembly Pastor</option><option>Music Director</option><option>Organist/Keyboardist</option><option>Sunday School Staff</option><option>Technical & Audio</option><option>Bible Study</option></select>')+'</div><div><label>Branch</label><select id="pTel"><option>Dartford</option><option>Swanscombe</option><option>Peckham</option><option>Luton</option><option>Meopham Village</option><option>Southampton</option><option>Derby</option><option>Eltham</option></select></div><div><label>Upload existing photo</label><input id="pPhoto" type="file" accept="image/*"></div><div><label>Instant snap</label><input id="pSnap" type="file" accept="image/*" capture="user"></div><div><label>Staff Username</label><input id="pUsername" autocomplete="off" placeholder="Enter staff username" value="'+esc(item?getStaffUser(item.uid):'')+'"></div><div><label>Staff Password</label><input id="pPassword" type="password" autocomplete="new-password" placeholder="Enter staff password"></div><div class="full row"><button id="saveProfile">'+(item?'Save Edit':'Save and Create ID')+'</button><button class="light" id="clearProfile">Clear</button></div></div></div><br>'+peopleTable(role,list);$('saveProfile').onclick=function(){saveProfile(role,item)};$('clearProfile').onclick=function(){profilePage(m,role)};bindPeopleActions(m,role)}
+function profilePage(m,role,item){editingUid=item?item.uid:null;var cd=role==='Student'?'Class':'Assignment',list=people().filter(function(p){return normRole(p.role)===role});m.innerHTML='<div class="card"><h2>'+role+' Profile Management</h2><div class="formgrid"><div><label>Name</label><input id="pName" value="'+esc(item?item.name:'')+'"></div><div><label>'+cd+'</label>'+(role==='Student'?'<input id="pClass" value="'+esc(item?item.classDept:'')+'">':'<select id="pClass"><option>Assistant Pastor</option><option>Director of Evangelism</option><option>Youth Pastor</option><option>Field Evangelist</option><option>Assembly Pastor</option><option>Music Director</option><option>Organist/Keyboardist</option><option>Sunday School Staff</option><option>Technical & Audio</option><option>Bible Study</option></select>')+'</div><div><label>Branch</label><select id="pTel"><option>Dartford</option><option>Swanscombe</option><option>Peckham</option><option>Luton</option><option>Meopham Village</option><option>Southampton</option><option>Derby</option><option>Eltham</option></select></div><div><label>Supervisor</label><input id="pSupervisor" autocomplete="off" placeholder="Enter supervisor name" value="'+esc(item&&item.supervisor?item.supervisor:'')+'"></div><div><label>Upload existing photo</label><input id="pPhoto" type="file" accept="image/*"></div><div><label>Instant snap</label><input id="pSnap" type="file" accept="image/*" capture="user"></div><div><label>Staff Username</label><input id="pUsername" autocomplete="off" placeholder="Enter staff username" value="'+esc(item?getStaffUser(item.uid):'')+'"></div><div><label>Staff Password</label><input id="pPassword" type="password" autocomplete="new-password" placeholder="Enter staff password"></div><div class="full row"><button id="saveProfile">'+(item?'Save Edit':'Save and Create ID')+'</button><button class="light" id="clearProfile">Clear</button></div></div></div><br>'+peopleTable(role,list);$('saveProfile').onclick=function(){saveProfile(role,item)};$('clearProfile').onclick=function(){profilePage(m,role)};bindPeopleActions(m,role)}
 function peopleTable(role,list){
  if(role!=='Student'){
   var h='<div class="card"><h2>'+role+' List</h2><div class="tablewrap"><table><tr><th>Name</th><th>ID</th><th>Assignment</th><th>Total Present</th><th>Total Absent</th><th>Action</th></tr>';
@@ -180,6 +181,7 @@ async function saveProfile(role,old){
  var name=$('pName').value.trim();
  var cls=$('pClass').value.trim();
  var tel=$('pTel').value.trim();
+ var supervisor=$('pSupervisor')?$('pSupervisor').value.trim():'';
  var addr=$('pAddr')?$('pAddr').value.trim():'';
  var staffUsername=$('pUsername')?$('pUsername').value.trim().toLowerCase():'';
  var staffPassword=$('pPassword')?$('pPassword').value:'';
@@ -200,12 +202,12 @@ async function saveProfile(role,old){
    if(old){
     var i=arr.findIndex(function(p){return p.uid===old.uid});
     if(i<0){toast('Staff record was not found. Please register again.');if(btn){btn.disabled=false;btn.textContent='Save Edit';}return;}
-    arr[i]={uid:old.uid,role:role,name:name,classDept:cls,tel:tel,addr:addr,photo:photo||old.photo||'',loginUsername:staffUsername||old.loginUsername||old.staffUsername||'',loginPassword:staffPassword||old.loginPassword||old.staffPassword||''};
+    arr[i]={uid:old.uid,role:role,name:name,classDept:cls,tel:tel,addr:addr,supervisor:supervisor||old.supervisor||'',photo:photo||old.photo||'',loginUsername:staffUsername||old.loginUsername||old.staffUsername||'',loginPassword:staffPassword||old.loginPassword||old.staffPassword||''};
     created=arr[i];
    }else{
     var uid=nextId(role),n=1;
     while(arr.some(function(p){return p.uid===uid})){uid=nextId(role)+'-'+(n++);}
-    created={uid:uid,role:role,name:name,classDept:cls,tel:tel,addr:addr,photo:photo||'',loginUsername:staffUsername,loginPassword:staffPassword};
+    created={uid:uid,role:role,name:name,classDept:cls,tel:tel,addr:addr,supervisor:supervisor,photo:photo||'',loginUsername:staffUsername,loginPassword:staffPassword};
     arr.push(created);
    }
    var saved=savePeople(arr);
@@ -233,10 +235,7 @@ async function saveProfile(role,old){
      created=latestPeople[pi];
     }
     var ua=users();
-    var duplicate=ua.find(function(u){
- return String(u.username||'').trim().toLowerCase()===staffUsername &&
-        String(u.uid||'')!==String(created.uid||'');
-});
+    var duplicate=ua.find(function(u){return String(u.username||'').trim().toLowerCase()===staffUsername && (!old || u.uid!==created.uid);});
     if(duplicate){toast('Staff username already exists. Choose another username.');if(btn){btn.disabled=false;btn.textContent=old?'Save Edit':'Save and Create ID';}return;}
     var linked=ua.find(function(u){return u.uid===created.uid;});
     if(!linked && old){linked=ua.find(function(u){return String(u.username||'').trim().toLowerCase()===String(old.uid||'').toLowerCase();});}
@@ -311,7 +310,57 @@ function downloadSimplePDF(filename,rows){
  var blob=new Blob([enc.encode(out)],{type:'application/pdf'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=filename||'attendance_report.pdf';document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},1000)
 }
 function downloadStaffPDF(uid){var p=people().find(function(x){return String(x.uid)===String(uid)&&normRole(x.role)==='Staff'});if(!p){var ar=ensureAttendanceIds().find(function(x){return String(x.uid)===String(uid)&&normRole(x.role)==='Staff'});if(ar)p={uid:ar.uid,name:ar.name||ar.uid,role:'Staff'}}if(!p)return;var q=staffPeriodTotals(uid),rows=[];q.rows.slice().reverse().forEach(function(r){if(r.pairs.length){r.pairs.forEach(function(x){rows.push([p.name,p.uid,r.date,x.in.time,x.out.time,formatDuration(x.minutes)])})}else{rows.push([p.name,p.uid,r.date,r.open?r.open.time:'—','',formatDuration(r.totalMinutes)])}});var info='Staff: '+p.name+'   |   Staff ID: '+p.uid+'   |   All Recorded Hours: '+formatDuration(q.daily);downloadSimplePDF((p.name||'Staff').replace(/[^A-Za-z0-9_-]+/g,'_')+'_attendance_report.pdf',{info:info,rows:rows})}
-function reportsHub(m){m.innerHTML='<div class="card"><h2>Reports</h2><div class="subtabs"><button id="fr" class="active">Staff Report</button><button id="ar">Admin General Reports</button></div><div id="reportArea"></div></div>';$('fr').onclick=function(){setSub('fr');reportArea('Staff')};$('ar').onclick=function(){setSub('ar');adminReports()};reportArea('Staff')}
+function activityReports(){return storeGet('anrem_daily_reports',[])}
+function saveActivityReports(a){return storeSet('anrem_daily_reports',a)}
+function activityWeekKey(date){var d=new Date(String(date||'')+'T00:00:00');if(isNaN(d.getTime()))return '';var day=(d.getDay()+6)%7;d.setDate(d.getDate()-day);return d.toISOString().slice(0,10)}
+function activityMonthKey(date){return String(date||'').slice(0,7)}
+function staffForReport(){if(!currentUser)return null;var p=people().find(function(x){return String(x.uid||'')===String(currentUser.uid||'')});if(!p&&currentUser.uid)p=people().find(function(x){return String(x.uid||'')===String(currentUser.uid)});return p||{uid:currentUser.uid||'',name:currentUser.name||'',classDept:'',supervisor:''}}
+function dailyActivitiesPage(m){
+ var p=staffForReport(),now=new Date(),date=now.toISOString().slice(0,10),tm=now.toLocaleTimeString();
+ if(!p)return m.innerHTML='<div class="card"><p>Staff profile could not be found.</p></div>';
+ m.innerHTML='<div class="card"><h2>Daily Activities Report</h2><p style="color:#667085">Submit your activities for today. Your report will be sent to Admin and included automatically in your weekly and monthly reports.</p><div class="formgrid">'+
+ '<div><label>Name</label><input id="arName" value="'+esc(p.name)+'" readonly></div>'+ 
+ '<div><label>Date</label><input id="arDate" type="date" value="'+esc(date)+'" readonly></div>'+ 
+ '<div><label>Time</label><input id="arTime" value="'+esc(tm)+'" readonly></div>'+ 
+ '<div><label>Job Role</label><input id="arRole" value="'+esc(p.classDept||'')+'" readonly></div>'+ 
+ '<div><label>Supervisor</label><input id="arSupervisor" value="'+esc(p.supervisor||'')+'" readonly></div>'+ 
+ '<div><label>Mode of Supervision</label><select id="arMode"><option value="Onsite">Onsite</option><option value="Remote">Remote</option></select></div>'+ 
+ '<div class="full"><label>What are your major challenges that affected your performance, which needs to be taken into consideration?</label><textarea id="arChallenges"></textarea></div>'+ 
+ '<div class="full"><label>What are your major achievements at work today?</label><textarea id="arAchievements"></textarea></div>'+ 
+ '<div class="full"><label>General report on incident and activities done according to your job role:</label><textarea id="arActivities"></textarea></div>'+ 
+ '<div><label>Do you have unfinished task that needs to be completed in next shift?</label><select id="arUnfinished"><option value="No">No</option><option value="Yes">Yes</option></select></div>'+ 
+ '<div id="arDetailsWrap" style="display:none"><label>If yes, give details</label><textarea id="arDetails"></textarea></div>'+ 
+ '<div class="full row"><button class="green" id="submitDailyActivity">Submit Daily Report</button></div></div></div>';
+ $('arUnfinished').onchange=function(){$('arDetailsWrap').style.display=this.value==='Yes'?'block':'none'};
+ $('submitDailyActivity').onclick=submitDailyActivity;
+}
+async function submitDailyActivity(){
+ var p=staffForReport();if(!p)return toast('Staff profile not found');
+ var challenges=$('arChallenges').value.trim(),achievements=$('arAchievements').value.trim(),activities=$('arActivities').value.trim(),unfinished=$('arUnfinished').value,details=$('arDetails')?$('arDetails').value.trim():'';
+ if(!challenges||!achievements||!activities)return toast('Please complete the three main report sections');
+ if(unfinished==='Yes'&&!details)return toast('Give details of the unfinished task');
+ var btn=$('submitDailyActivity');if(btn){btn.disabled=true;btn.textContent='Submitting...'}
+ var a=activityReports();a.push({id:'DAR-'+Date.now()+'-'+Math.random().toString(36).slice(2,7),uid:p.uid,name:p.name,date:$('arDate').value,time:$('arTime').value,jobRole:p.classDept||'',supervisor:p.supervisor||'',mode:$('arMode').value,challenges:challenges,achievements:achievements,activities:activities,unfinished:unfinished,unfinishedDetails:details,week:activityWeekKey($('arDate').value),month:activityMonthKey($('arDate').value)});
+ var ok=saveActivityReports(a);if(!ok){if(btn){btn.disabled=false;btn.textContent='Submit Daily Report'}return;}
+ var cloudOk=await cloudPush('anrem_daily_reports',activityReports());
+ if(!cloudOk){if(btn){btn.disabled=false;btn.textContent='Submit Daily Report'}return;}
+ dailyActivitiesPage($('main'));toast('Daily report submitted to Admin');
+}
+function compiledWeeklyReport(uid,week){return activityReports().filter(function(r){return String(r.uid)===String(uid)&&r.week===week}).sort(function(a,b){return (a.date+' '+a.time).localeCompare(b.date+' '+b.time)})}
+function compiledMonthlyWeeks(uid,month){var weeks={};activityReports().filter(function(r){return String(r.uid)===String(uid)&&r.month===month}).forEach(function(r){(weeks[r.week]||(weeks[r.week]=[])).push(r)});return weeks}
+function activityReportCard(r){return '<div class="card" style="margin-top:10px"><p><b>'+esc(r.date)+' '+esc(r.time)+'</b> | Supervisor: '+esc(r.supervisor||'')+' | Mode: '+esc(r.mode||'')+'</p><p><b>Challenges:</b><br>'+esc(r.challenges).replace(/\n/g,'<br>')+'</p><p><b>Achievements:</b><br>'+esc(r.achievements).replace(/\n/g,'<br>')+'</p><p><b>Incidents & Activities:</b><br>'+esc(r.activities).replace(/\n/g,'<br>')+'</p><p><b>Unfinished task:</b> '+esc(r.unfinished)+(r.unfinished==='Yes'?'<br>'+esc(r.unfinishedDetails||'').replace(/\n/g,'<br>'):'')+'</p></div>'}
+function activityStaffFolder(p){
+ var rows=activityReports().filter(function(r){return String(r.uid)===String(p.uid)}).sort(function(a,b){return (b.date+' '+b.time).localeCompare(a.date+' '+a.time)}),weeks={},months={};rows.forEach(function(r){(weeks[r.week]||(weeks[r.week]=[])).push(r);(months[r.month]||(months[r.month]=[])).push(r)});
+ var h='<details class="card"><summary style="cursor:pointer;font-weight:700">'+esc(p.name)+' — '+esc(p.uid)+'</summary><p><b>Job Role:</b> '+esc(p.classDept||'')+' &nbsp; <b>Supervisor:</b> '+esc(p.supervisor||'')+'</p><h4>Daily Reports ('+rows.length+')</h4>';
+ if(rows.length)rows.forEach(function(r){h+=activityReportCard(r)});else h+='<p>No daily activity reports submitted.</p>';
+ h+='<h4>Weekly Reports</h4>';
+ Object.keys(weeks).sort().reverse().forEach(function(w){var rr=weeks[w];h+='<details style="margin:8px 0"><summary>Week starting '+esc(w)+' — '+rr.length+' daily report(s)</summary>'+rr.map(activityReportCard).join('')+'</details>'});if(!Object.keys(weeks).length)h+='<p>No weekly reports yet.</p>';
+ h+='<h4>Monthly Reports</h4>';
+ Object.keys(months).sort().reverse().forEach(function(mo){var mw=compiledMonthlyWeeks(p.uid,mo);h+='<details style="margin:8px 0"><summary>'+esc(mo)+' Monthly Report</summary>';Object.keys(mw).sort().forEach(function(w){h+='<div class="card"><b>Week starting '+esc(w)+'</b>'+mw[w].map(activityReportCard).join('')+'</div>'});h+='</details>'});if(!Object.keys(months).length)h+='<p>No monthly reports yet.</p>';
+ return h+'</details>';
+}
+function adminActivityReports(){var area=$('reportArea'),ps=people().filter(function(p){return normRole(p.role)==='Staff'}).sort(function(a,b){return String(a.name||'').localeCompare(String(b.name||''))});area.innerHTML='<h3>Staff Activity Reports</h3><p style="color:#667085">Click a Staff folder to open Daily, automatically compiled Weekly, and Monthly reports.</p>'+ (ps.length?ps.map(activityStaffFolder).join(''):'<div class="card">No Staff registered.</div>');}
+function reportsHub(m){m.innerHTML='<div class="card"><h2>Reports</h2><div class="subtabs"><button id="fr" class="active">Staff Attendance</button><button id="sr">Staff Activity Reports</button><button id="ar">Admin General Reports</button></div><div id="reportArea"></div></div>';$('fr').onclick=function(){setSub('fr');reportArea('Staff')};$('sr').onclick=function(){setSub('sr');adminActivityReports()};$('ar').onclick=function(){setSub('ar');adminReports()};reportArea('Staff')}
 function setSub(id){Array.prototype.forEach.call(document.querySelectorAll('.subtabs button'),function(b){b.classList.toggle('active',b.id===id)})}
 function reportArea(role){var area=$('reportArea'),classes=role==='Student'?[...new Set(people().filter(function(p){return p.role==='Student'}).map(function(p){return p.classDept||'Unassigned'}))].sort():[];area.innerHTML='<h3>'+role+' Attendance Report</h3>'+(role==='Student'?'<label>Filter by Class</label><select id="reportClass"><option value="ALL">All Classes</option>'+classes.map(function(c){return '<option>'+esc(c)+'</option>'}).join('')+'</select><br><br>':'')+'<div class="row"><button id="repCsv">Download '+role+' CSV</button> <button id="repPdf">Download '+role+' PDF</button></div><br><div id="classReport"></div>'+(role==='Staff'?'<hr><h3>Submit General Report</h3><label>Report Title</label><input id="gTitle" placeholder="e.g. General class observation"><br><br><label>Details</label><textarea id="gText" placeholder="Type the general report here..."></textarea><br><br><button class="green" id="submitG">Submit Report to Admin</button>':'');$('repCsv').onclick=function(){downloadCSV(role,false)};$('repPdf').onclick=function(){downloadAttendancePDF(role,false)};if(role==='Staff')$('submitG').onclick=submitGeneralReport;renderClassReport(role);if(role==='Student')$('reportClass').onchange=function(){renderClassReport(role)}}
 function renderClassReport(role){var area=$('classReport');if(!area)return;var selected=$('reportClass')?$('reportClass').value:'ALL',allPeople=people(),list=allPeople.filter(function(p){return normRole(p.role)===role&&(selected==='ALL'||p.classDept===selected)}),a=ensureAttendanceIds(),days=attendanceDays(role),h='<div class="card"><b>Recorded Attendance Days:</b> '+days.length+' <span style="margin-left:18px"><b>Class/Role:</b> '+(selected==='ALL'?'All':esc(selected))+'</span></div>';if(role==='Staff'){var map={};list.forEach(function(p){map[String(p.uid).toLowerCase()]=p});a.filter(function(r){return normRole(r.role)==='Staff'}).forEach(function(r){var k=String(r.uid||'').toLowerCase();if(!map[k])map[k]={uid:r.uid,name:r.name||('Staff '+r.uid),role:'Staff',classDept:r.classDept||'',loginUsername:''}});Object.keys(map).map(function(k){return map[k]}).sort(function(a,b){return String(a.name||'').localeCompare(String(b.name||''))}).forEach(function(p){h+=staffReportHtml(p)});area.innerHTML=h;bindAttendanceEditButtons(area,role);Array.prototype.forEach.call(area.querySelectorAll('[data-staff-csv]'),function(b){b.onclick=function(){downloadStaffCSV(this.getAttribute('data-staff-csv'))}});Array.prototype.forEach.call(area.querySelectorAll('[data-staff-pdf]'),function(b){b.onclick=function(){downloadStaffPDF(this.getAttribute('data-staff-pdf'))}});return;}if(role==='Student'){var groups={};list.forEach(function(p){(groups[p.classDept||'Unassigned']||(groups[p.classDept||'Unassigned']=[])).push(p)});Object.keys(groups).sort().forEach(function(cls){h+='<div class="card"><h3>'+esc(cls)+'</h3><div class="tablewrap"><table><tr><th>Student</th><th>ID</th><th>Time Scanned (Latest)</th><th>Total Present</th><th>Total Absent</th></tr>';groups[cls].forEach(function(p){var rr=a.filter(function(r){return String(r.uid)===String(p.uid)&&normRole(r.role)==='Student'}).sort(function(a,b){return (a.date+' '+a.time).localeCompare(b.date+' '+b.time)}),z=attendanceSummary(p),latest=rr.length?rr[rr.length-1].date+' '+rr[rr.length-1].time:'Not scanned';h+='<tr><td>'+esc(p.name)+'</td><td>'+esc(p.uid)+'</td><td>'+esc(latest)+'</td><td>'+z.present+'</td><td>'+z.absent+'</td></tr>'});h+='</table></div></div>'})}else h+=recordHtml(role,false,true);area.innerHTML=h;if(role!=='Staff')bindAttendanceEditButtons(area,role)}
