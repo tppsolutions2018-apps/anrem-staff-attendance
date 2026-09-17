@@ -105,7 +105,7 @@ async function login(){
   currentUser=found;cacheSet('anrem_current_user',found);$('login').classList.add('hide');$('app').classList.remove('hide');$('who').textContent=found.name+' ('+found.role+')';makeTabs();nav(found.role==='Staff'?'clock':'dash');return false;
  }
 function logout(){stopScan();currentUser=null;try{localStorage.removeItem('anrem_current_user')}catch(e){}try{localStorage.removeItem('anrem_current_user')}catch(e){}try{localStorage.removeItem('anrem_cloud_token')}catch(e){}$('app').classList.add('hide');$('login').classList.remove('hide')}
-var pages=[['dash','Dashboard'],['staff','Create Staff ID Card'],['scanStaff','Scan Staff'],['staffRecords','Staff Records'],['clock','Staff Clock In/Out'],['dailyReport','Daily Activities Report'],['reports','Reports'],['settings','Settings']];
+var pages=[['dash','Dashboard'],['staff','Create Staff ID Card'],['scanStaff','Scan Staff'],['staffRecords','Staff Records'],['clock','Staff Clock In/Out'],['activityReports','Staff Activity Report'],['reports','Reports'],['settings','Settings']];
 function isStaffSession(){return !!currentUser&&currentUser.role==='Staff';}
 function makeTabs(){
  var h='';
