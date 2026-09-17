@@ -216,6 +216,74 @@ app.put('/api/attendance/:id',auth,adminOnly,async(req,res)=>{
   }catch(e){console.error(e);res.status(500).json({error:'Unable to edit attendance'})}
 });
 app.delete('/api/attendance/:id',auth,adminOnly,async(req,res)=>{try{await pool.query('DELETE FROM attendance WHERE event_id=$1',[String(req.params.id)]);res.json({ok:true,state:await sanitizeStateFor(req.user)})}catch(e){console.error(e);res.status(500).json({error:'Unable to delete attendance'})}});
+app.put('/api/activity-reports/:id',auth,adminOnly,async(req,res)=>{
+  try{
+    const id=String(req.params.id);
+    const current=await getSnapshot('anrem_daily_reports',[]);
+    const reports=Array.isArray(current)?current:[];
+    const index=reports.findIndex(r=>String(r.id)===id);
+
+    if(index<0){
+      return res.status(404).json({error:'Activity report not found'});
+    }
+
+    const old=reports[index];
+    const next=Object.assign({},old,req.body||{});
+
+    if(!next.date || !/^\d{4}-\d{2}-\d{2}$/.test(String(next.date))){
+      return res.status(400).json({error:'Invalid report date'});
+    }
+
+    if(!next.time || !String(next.time).trim()){
+      return res.status(400).json({error:'Report time is required'});
+    }
+
+    next.date=String(next.date);
+    next.time=String(next.time).trim();
+
+    const d=new Date(next.date+'T00:00:00');
+    if(!isNaN(d.getTime())){
+      const day=(d.getDay()+6)%7;
+      d.setDate(d.getDate()-day);
+      next.week=d.toISOString().slice(0,10);
+      next.month=next.date.slice(0,7);
+    }
+
+    reports[index]=next;
+    await saveSnapshot('anrem_daily_reports',reports);
+
+    res.json({
+      ok:true,
+      state:await sanitizeStateFor(req.user)
+    });
+  }catch(e){
+    console.error(e);
+    res.status(500).json({error:'Unable to update activity report'});
+  }
+});
+
+app.delete('/api/activity-reports/:id',auth,adminOnly,async(req,res)=>{
+  try{
+    const id=String(req.params.id);
+    const current=await getSnapshot('anrem_daily_reports',[]);
+    const reports=Array.isArray(current)?current:[];
+    const next=reports.filter(r=>String(r.id)!==id);
+
+    if(next.length===reports.length){
+      return res.status(404).json({error:'Activity report not found'});
+    }
+
+    await saveSnapshot('anrem_daily_reports',next);
+
+    res.json({
+      ok:true,
+      state:await sanitizeStateFor(req.user)
+    });
+  }catch(e){
+    console.error(e);
+    res.status(500).json({error:'Unable to delete activity report'});
+  }
+});
 app.post('/api/import',auth,adminOnly,async(req,res)=>{
   try{
     const incoming=req.body||{};
