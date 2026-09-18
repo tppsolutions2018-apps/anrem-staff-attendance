@@ -110,7 +110,11 @@ function isStaffSession(){return !!currentUser&&currentUser.role==='Staff';}
 function makeTabs(){
  var h='';
  pages.forEach(function(p){
-  if(!isStaffSession()||p[0]==='clock'||p[0]==='dailyReport')h+='<button type="button" data-page="'+p[0]+'">'+p[1]+'</button> ';
+  if(isStaffSession()){
+   if(p[0]==='clock'||p[0]==='dailyReport')h+='<button type="button" data-page="'+p[0]+'">'+p[1]+'</button> ';
+  }else{
+   if(p[0]!=='dailyReport')h+='<button type="button" data-page="'+p[0]+'">'+p[1]+'</button> ';
+  }
  });
  $('tabs').innerHTML=h;
  Array.prototype.forEach.call($('tabs').querySelectorAll('button'),function(b){
