@@ -1,112 +1,239 @@
-<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>Staff Login Portal - ANREM</title>
-<style>:root{--navy:#241075;--orange:#f58220;--red:#e51b23;--green:#0a9652;--bg:#f4f6fb;--line:#e5e7ef}*{box-sizing:border-box}body{margin:0;font-family:Arial,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:var(--bg);color:#111}button{border:0;border-radius:14px;padding:13px 16px;background:var(--navy);color:#fff;font-weight:800;font-size:16px;cursor:pointer}button.green{background:var(--green)}button.red{background:var(--red)}button.light{background:#fff;color:var(--navy);border:1px solid var(--line)}input{width:100%;padding:13px;border:1px solid var(--line);border-radius:12px;background:#fff;font-size:16px}.center{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:18px}.card{background:#fff;border:1px solid var(--line);border-radius:22px;padding:20px;box-shadow:0 8px 25px #00000010}.login-card{max-width:460px;width:100%}.logo{width:110px;height:110px;object-fit:contain;border-radius:24px;display:block;margin:0 auto 10px}h1,h2{color:var(--navy);text-align:center}label{font-size:13px;color:#475467;font-weight:800}.pass{display:grid;grid-template-columns:1fr 70px;gap:8px}.hide{display:none!important}.top{position:sticky;top:0;background:#fff;border-bottom:1px solid var(--line);padding:12px;display:flex;align-items:center;gap:10px;z-index:5}.top img{width:48px;height:48px;object-fit:contain}.spacer{flex:1}.wrap{max-width:850px;margin:auto;padding:14px}.row{display:flex;gap:10px;flex-wrap:wrap}.row button{flex:1;min-width:150px}.stat{font-size:30px;font-weight:900;color:var(--navy);text-align:center;padding:12px}.tablewrap{overflow:auto;border:1px solid var(--line);border-radius:16px}table{border-collapse:collapse;width:100%;min-width:520px}th,td{padding:10px;border-bottom:1px solid var(--line);text-align:left}th{background:#fafafa;color:var(--navy)}#toast{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);background:#111;color:#fff;padding:12px 16px;border-radius:999px;display:none;z-index:99;max-width:92%;text-align:center}.note{background:#fff8e8;border:1px solid #f3d48a;padding:12px;border-radius:14px;color:#6b4e00}@media(max-width:600px){.row{display:grid}.row button{width:100%}}
-.login-role{font-size:22px;font-weight:900;letter-spacing:.4px;text-align:center;margin:14px 0 4px}.login-subtitle{text-align:center;color:#667085;font-size:14px;font-weight:600;margin:0 0 18px}.admin-role{padding:10px 12px;border-radius:12px;background:#eee8ff;color:#241075;border:1px solid #d8ccff}.staff-role{padding:10px 12px;border-radius:12px;background:#fff1e7;color:#b84f00;border:1px solid #ffd2ad}
-</style></head><body>
-<div id="login" class="center"><form id="loginForm" class="card login-card"><img class="logo" src="logo.png"><div class="login-role staff-role">👤 STAFF LOGIN</div><p class="login-subtitle">Staff Attendance &amp; Clock In/Out</p><p style="text-align:center;color:#667085">ANREM Staff Attendance</p><label>Staff ID or Username</label><input id="staffUser" autocomplete="username" placeholder="e.g. ANREM-STF-123456 or username"><br><br><label>Password</label><div class="pass"><input id="staffPass" type="password" autocomplete="current-password" placeholder="Enter your password"><button type="button" class="light" id="eye">👁</button></div><br><button type="submit" style="width:100%">Login as Staff</button><br><br><a href="index.html" style="display:block;text-align:center;color:#241075;font-weight:800;text-decoration:none">Admin Login</a><p class="note">Use the Staff ID shown on your Staff ID card, or the username created during Staff registration.</p></form></div>
-<div id="app" class="hide"><div class="top"><img src="logo.png"><b id="who">Staff</b><span class="spacer"></span><button class="light" id="logout">Logout</button></div><div class="wrap"><div id="content"></div></div></div><div id="toast"></div>
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ANREM Staff Portal</title>
+<style>
+:root{--navy:#241075;--orange:#f58220;--green:#0a9652;--red:#e51b23;--bg:#f4f6fb;--line:#e5e7ef}
+*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;background:var(--bg);color:#111}
+button{border:0;border-radius:14px;padding:13px 16px;background:var(--navy);color:#fff;font-weight:800;font-size:16px;cursor:pointer}
+button.green{background:var(--green)}button.red{background:var(--red)}button.light{background:#fff;color:var(--navy);border:1px solid var(--line)}
+input,select,textarea{width:100%;padding:13px;border:1px solid var(--line);border-radius:12px;background:#fff;font-size:16px}
+textarea{min-height:120px}label{font-size:13px;color:#475467;font-weight:800}.hide{display:none!important}
+.center{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:18px}
+.card{background:#fff;border:1px solid var(--line);border-radius:22px;padding:18px;box-shadow:0 8px 25px #00000010}
+.login{max-width:450px;width:100%}.logo{width:125px;height:125px;object-fit:contain}
+h1,h2,h3{color:var(--navy)}.brand{text-align:center;font-weight:900;color:var(--navy);font-size:21px}.sub{text-align:center;font-weight:900;color:var(--red);margin-bottom:16px}
+.top{position:sticky;top:0;z-index:5;background:#fff;border-bottom:1px solid var(--line);padding:10px;display:flex;align-items:center;gap:10px}
+.top img{width:48px;height:48px;object-fit:contain}.spacer{flex:1}.tabs{display:flex;gap:8px;overflow:auto;padding:10px;background:#fff;border-bottom:1px solid var(--line)}
+.tabs button{white-space:nowrap;background:#eef0f6;color:#111}.tabs button.active{background:var(--navy);color:#fff}
+.wrap{max-width:900px;margin:auto;padding:14px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.full{grid-column:1/-1}
+.row{display:flex;gap:8px;flex-wrap:wrap}.muted{color:#667085}.toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#111;color:#fff;padding:12px 18px;border-radius:999px;display:none;z-index:20;max-width:92%}
+@media(max-width:700px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<div id="login" class="center">
+<form id="loginForm" class="card login">
+<center><img class="logo" src="logo.png" alt="ANREM logo"></center>
+<div class="brand">ALL NATIONS REVIVAL EVANGELISTIC MINISTRIES</div>
+<div class="sub">STAFF PORTAL</div>
+<label>Staff Username</label>
+<input id="username" autocomplete="username">
+<br><br>
+<label>Password</label>
+<input id="password" type="password" autocomplete="current-password">
+<br><br>
+<button type="submit" class="green" style="width:100%">STAFF LOGIN</button>
+<br><br>
+<a href="index.html" style="display:block;text-align:center;color:#241075;font-weight:800">Admin Login</a>
+</form>
+</div>
+
+<div id="app" class="hide">
+<div class="top">
+<img src="logo.png" alt="ANREM logo">
+<b>ANREM<br>Staff Portal</b>
+<span id="who"></span><div class="spacer"></div>
+<button class="light" id="logout">Logout</button>
+</div>
+<div id="tabs" class="tabs"></div>
+<div class="wrap"><div id="main"></div></div>
+</div>
+<div id="toast" class="toast"></div>
+
 <script>
+(function(){
+'use strict';
+var API=window.CAC_API_BASE||window.location.origin;
+var currentUser=null;
+
 function $(id){return document.getElementById(id)}
-function toast(m){var t=$('toast');t.textContent=m;t.style.display='block';clearTimeout(window.__tt);window.__tt=setTimeout(function(){t.style.display='none'},2800)}
-var CAC_API_BASE=window.CAC_API_BASE||window.location.origin;
-function cloudToken(){try{return localStorage.getItem('anrem_cloud_token')||''}catch(e){return ''}}
-function cloudHeaders(){var h={'Content-Type':'application/json'};var t=cloudToken();if(t)h.Authorization='Bearer '+t;return h}
-function get(k,d){try{var v=localStorage.getItem(k);return v?JSON.parse(v):d}catch(e){return d}}
-function cacheSet(k,v){try{localStorage.setItem(k,JSON.stringify(v));return true}catch(e){return false}}
-function applyCloudState(st){if(!st)return;Object.keys(st).forEach(function(k){cacheSet(k,st[k])})}
+function toast(msg){var t=$('toast');t.textContent=msg;t.style.display='block';setTimeout(function(){t.style.display='none'},2800)}
+function token(){try{return localStorage.getItem('anrem_cloud_token')||''}catch(e){return ''}}
+function headers(){var h={'Content-Type':'application/json'},t=token();if(t)h.Authorization='Bearer '+t;return h}
+function stateGet(k,d){try{var x=localStorage.getItem(k);return x?JSON.parse(x):d}catch(e){return d}}
+function applyState(s){if(!s)return;Object.keys(s).forEach(function(k){try{localStorage.setItem(k,JSON.stringify(s[k]))}catch(e){}})}
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
-function people(){var a=get('rcs_people',[]);return Array.isArray(a)?a:[]}
-function users(){var a=get('rcs_users',[]);return Array.isArray(a)?a:[]}
-function att(){var a=get('rcs_att',[]);return Array.isArray(a)?a:[]}
 function today(){return new Date().toISOString().slice(0,10)}
-function timeNow(){return new Date().toLocaleTimeString()}
-async function cloudLogin(identifier,password){
+function now(){return new Date().toLocaleTimeString()}
+function people(){return stateGet('rcs_people',[])}
+function attendance(){return stateGet('rcs_att',[])}
+function reports(){return stateGet('anrem_daily_reports',[])}
+
+async function login(u,p){
  try{
-  var r=await fetch(CAC_API_BASE+'/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:String(identifier||'').trim().toLowerCase(),password:String(password||'')})});
-  var x=await r.json().catch(function(){return {error:'Login failed'}});
+  var r=await fetch(API+'/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})});
+  var x=await r.json();
   if(!r.ok)throw new Error(x.error||'Login failed');
-  if(!x.user||String(x.user.role||'').toLowerCase()!=='staff')throw new Error('Please use the Staff Login Portal with a registered Staff account.');
+  if(!x.user||String(x.user.role||'').toLowerCase()!=='staff')throw new Error('This portal is for Staff accounts only.');
   localStorage.setItem('anrem_cloud_token',x.token);
-  applyCloudState(x.state);
-  return x;
- }catch(e){
-  toast(e.message||'Cloud login failed');
-  return false;
- }
+  applyState(x.state);
+  currentUser=x.user;
+  localStorage.setItem('anrem_staff_portal_user',JSON.stringify(currentUser));
+  showApp();
+ }catch(e){toast(e.message||'Unable to log in')}
+}
+
+function staffRecord(){
+ return people().find(function(p){
+  return p&&String(p.role||'').toLowerCase()==='staff'&&
+   (String(p.uid||'')===String(currentUser.uid||'')||String(p.uid||'')===String(currentUser.username||''));
+ });
+}
+
+function makeTabs(){
+ $('tabs').innerHTML=
+  '<button data-page="clock">Staff Clock In/Out</button>'+
+  '<button data-page="daily">Daily Activities Report</button>';
+ Array.prototype.forEach.call($('tabs').querySelectorAll('button'),function(b){
+  b.onclick=function(){nav(this.getAttribute('data-page'))}
+ });
+}
+
+function nav(page){
+ Array.prototype.forEach.call($('tabs').querySelectorAll('button'),function(b){
+  b.classList.toggle('active',b.getAttribute('data-page')===page)
+ });
+ if(page==='clock')clockPage();
+ if(page==='daily')dailyPage();
+}
+
+function clockPage(){
+ var p=staffRecord();
+ if(!p){$('main').innerHTML='<div class="card"><h2>Staff record not found</h2><p>Please contact Admin.</p></div>';return}
+ var rows=attendance().filter(function(r){
+  return String(r.uid)===String(p.uid)&&(r.session==='Clock In'||r.session==='Clock Out')
+ });
+ var todayRows=rows.filter(function(r){return r.date===today()});
+ var last=todayRows.length?todayRows[todayRows.length-1]:null;
+
+ $('main').innerHTML=
+ '<div class="card"><h2>Staff Clock In/Out</h2>'+
+ '<h3>'+esc(p.name)+'</h3>'+
+ '<p><b>Staff ID:</b> '+esc(p.uid)+'</p>'+
+ '<h1>'+now()+'</h1>'+
+ '<div class="row"><button class="green" id="cin">Clock In</button><button class="red" id="cout">Clock Out</button></div>'+
+ '<p class="muted">You can clock in and out as required.</p></div><br>'+
+ '<div class="card"><h3>My Recent Clock Records</h3>'+
+ '<div>'+rows.slice(-20).reverse().map(function(r){
+  return '<p><b>'+esc(r.date)+'</b> — '+esc(r.time)+' — '+esc(r.session)+'</p>'
+ }).join('')+'</div></div>';
+
+ $('cin').onclick=function(){
+  var a=attendance();
+  a.push({date:today(),time:now(),uid:p.uid,name:p.name,role:'Staff',
+   classDept:p.classDept||'',session:'Clock In',status:'Present',scanner:'Self'});
+  saveAttendance(a,'Clock In');
+ };
+ $('cout').onclick=function(){
+  var a=attendance(),day=a.filter(function(r){return String(r.uid)===String(p.uid)&&r.date===today()}),last=day.length?day[day.length-1]:null;
+  if(!last||last.session!=='Clock In')return toast('Clock In first before Clock Out.');
+  a.push({date:today(),time:now(),uid:p.uid,name:p.name,role:'Staff',
+   classDept:p.classDept||'',session:'Clock Out',status:'Present',scanner:'Self'});
+  saveAttendance(a,'Clock Out');
+ };
+}
+
+async function saveAttendance(a,msg){
+ try{
+  var r=await fetch(API+'/api/attendance/sync',{method:'POST',headers:headers(),body:JSON.stringify({value:a})});
+  var x=await r.json();if(!r.ok)throw new Error(x.error||'Cloud save failed');
+  applyState(x.state||{rcs_att:a});toast(msg+' saved');clockPage();
+ }catch(e){toast(e.message||'Cloud save failed')}
+}
+
+function dailyPage(){
+ var p=staffRecord();
+ if(!p){$('main').innerHTML='<div class="card"><p>Staff record not found.</p></div>';return}
+ var date=today(),tm=now();
+ $('main').innerHTML=
+ '<div class="card"><h2>Daily Activities Report</h2>'+
+ '<p class="muted">Complete and submit your daily report to Admin.</p>'+
+ '<div class="grid">'+
+ '<div><label>Name</label><input id="arName" readonly value="'+esc(p.name)+'"></div>'+
+ '<div><label>Date</label><input id="arDate" type="date" readonly value="'+date+'"></div>'+
+ '<div><label>Time</label><input id="arTime" readonly value="'+esc(tm)+'"></div>'+
+ '<div><label>Job Role</label><input id="arRole" readonly value="'+esc(p.classDept||'')+'"></div>'+
+ '<div><label>Supervisor</label><input id="arSup" readonly value="'+esc(p.supervisor||'')+'"></div>'+
+ '<div><label>Mode of Supervision</label><select id="arMode"><option>Onsite</option><option>Remote</option></select></div>'+
+ '<div class="full"><label>What are your major challenges that affected your performance, which needs to be taken into consideration?</label><textarea id="arChallenges"></textarea></div>'+
+ '<div class="full"><label>What are your major achievements at work today?</label><textarea id="arAchievements"></textarea></div>'+
+ '<div class="full"><label>General report on incident and activities done according to your job role:</label><textarea id="arActivities"></textarea></div>'+
+ '<div><label>Do you have unfinished task that needs to be completed in next shift?</label><select id="arUnfinished"><option>No</option><option>Yes</option></select></div>'+
+ '<div id="details"><label>If yes, give details</label><textarea id="arDetails"></textarea></div>'+
+ '<div class="full"><button class="green" id="submit">Submit Daily Report</button></div>'+
+ '</div></div>';
+ $('details').style.display='none';
+ $('arUnfinished').onchange=function(){$('details').style.display=this.value==='Yes'?'block':'none'};
+ $('submit').onclick=submitReport;
+}
+
+async function submitReport(){
+ var p=staffRecord();
+ var challenges=$('arChallenges').value.trim(),achievements=$('arAchievements').value.trim(),activities=$('arActivities').value.trim();
+ var unfinished=$('arUnfinished').value,details=$('arDetails').value.trim();
+ if(!challenges||!achievements||!activities)return toast('Please complete the three main report sections.');
+ if(unfinished==='Yes'&&!details)return toast('Please give details of the unfinished task.');
+ var r={
+  id:'DAR-'+Date.now()+'-'+Math.random().toString(36).slice(2,7),
+  uid:p.uid,name:p.name,date:$('arDate').value,time:$('arTime').value,
+  jobRole:p.classDept||'',supervisor:p.supervisor||'',mode:$('arMode').value,
+  challenges:challenges,achievements:achievements,activities:activities,
+  unfinished:unfinished,unfinishedDetails:details,
+  week:weekKey($('arDate').value),month:$('arDate').value.slice(0,7)
+ };
+ var a=reports();a.push(r);
+ try{
+  $('submit').disabled=true;$('submit').textContent='Submitting...';
+  var resp=await fetch(API+'/api/snapshot/anrem_daily_reports',{method:'POST',headers:headers(),body:JSON.stringify({value:a})});
+  var x=await resp.json();if(!resp.ok)throw new Error(x.error||'Cloud save failed');
+  applyState(x.state||{anrem_daily_reports:a});
+  toast('Daily report submitted to Admin');
+  nav('daily');
+ }catch(e){$('submit').disabled=false;$('submit').textContent='Submit Daily Report';toast(e.message||'Cloud save failed')}
+}
+function weekKey(d){
+ var x=new Date(d+'T00:00:00'),day=x.getDay()||7;
+ x.setDate(x.getDate()-day+1);
+ return x.toISOString().slice(0,10);
+}
+
+function showApp(){
+ $('login').classList.add('hide');$('app').classList.remove('hide');
+ $('who').textContent=currentUser.name+' (Staff)';
+ makeTabs();nav('clock');
+}
+function logout(){
+ currentUser=null;
+ try{localStorage.removeItem('anrem_cloud_token');localStorage.removeItem('anrem_staff_portal_user')}catch(e){}
+ $('app').classList.add('hide');$('login').classList.remove('hide');
 }
 async function restore(){
- var token=cloudToken();
- if(!token)return;
+ var saved=stateGet('anrem_staff_portal_user',null),t=token();
+ if(!saved||!t)return;
  try{
-  var r=await fetch(CAC_API_BASE+'/api/state',{headers:cloudHeaders()});
-  if(!r.ok)throw new Error('Session expired');
-  var st=await r.json();
-  applyCloudState(st);
-  var uid=String((st.rcs_people||[]).find(function(x){return x&&String(x.role||'').toLowerCase()==='staff'})?.uid||'');
-  var u=(st.rcs_users||[]).find(function(x){return x&&String(x.role||'').toLowerCase()==='staff'});
-  if(u&&u.uid)uid=String(u.uid);
-  var s=(st.rcs_people||[]).find(function(x){return x&&String(x.role||'').toLowerCase()==='staff'&&String(x.uid||'')===uid});
-  if(s&&!s.paused){
-   current=s;
-   sessionStorage.setItem('cac_staff_portal_uid',s.uid);
-   $('login').classList.add('hide');$('app').classList.remove('hide');
-   $('who').textContent=s.name+' • '+s.uid;
-   render();
-  }
- }catch(e){
-  try{localStorage.removeItem('anrem_cloud_token')}catch(x){}
-  sessionStorage.removeItem('cac_staff_portal_uid');
- }
+  var r=await fetch(API+'/api/state',{headers:headers()});
+  if(!r.ok)throw new Error();
+  var x=await r.json();applyState(x);currentUser=saved;showApp();
+ }catch(e){logout()}
 }
-async function login(e){
- if(e)e.preventDefault();
- var btn=$('loginForm').querySelector('button[type="submit"]');
- if(btn)btn.disabled=true;
- try{
-  var identifier=$('staffUser').value.trim();
-  var password=$('staffPass').value;
-  if(!identifier||!password){toast('Enter your Staff ID/username and password.');return false}
-  var cloud=await cloudLogin(identifier,password);
-  if(cloud===false)return false;
-  var staff=cloud.user;
-  if(!staff||String(staff.role||'').toLowerCase()!=='staff'){toast('This is not a Staff account.');return false}
-  if(staff.active===false){toast('Your Staff account is paused. Contact Admin.');return false}
-  var ps=people();
-  var profile=ps.find(function(x){return x&&String(x.role||'').toLowerCase()==='staff'&&String(x.uid||'').toLowerCase()===String(staff.uid||'').toLowerCase()});
-  if(!profile){toast('Registered Staff record not found. Contact Admin.');return false}
-  if(profile.paused){toast('Your Staff account is paused. Contact Admin.');return false}
-  current=Object.assign({},profile,{username:staff.username,role:'Staff'});
-  sessionStorage.setItem('cac_staff_portal_uid',current.uid);
-  $('login').classList.add('hide');$('app').classList.remove('hide');
-  $('who').textContent=current.name+' • '+current.uid;
-  $('staffPass').value='';
-  render();
-  return false;
- }finally{
-  if(btn)btn.disabled=false;
- }
-}
-function logout(){current=null;sessionStorage.removeItem('cac_staff_portal_uid');try{localStorage.removeItem('anrem_cloud_token')}catch(e){}$('app').classList.add('hide');$('login').classList.remove('hide');$('staffPass').value=''}
-
-function parseClockMinutes(dateStr,timeStr){var d=new Date(String(dateStr||'')+' '+String(timeStr||''));if(!isNaN(d.getTime()))return d.getHours()*60+d.getMinutes()+d.getSeconds()/60;var m=String(timeStr||'').match(/(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?/i);if(!m)return null;var h=Number(m[1]),mi=Number(m[2]),se=Number(m[3]||0);if(m[4]){var ap=m[4].toUpperCase();if(ap==='PM'&&h<12)h+=12;if(ap==='AM'&&h===12)h=0;}return h*60+mi+se/60}
-function formatDuration(mins){if(mins===null||mins===undefined||isNaN(mins))return '—';mins=Math.max(0,Math.round(mins));return Math.floor(mins/60)+'h '+String(mins%60).padStart(2,'0')+'m'}
-function dailyRows(){var a=att().filter(function(r){return r.uid===current.uid&&(r.session==='Clock In'||r.session==='Clock Out')}),days={};a.forEach(function(r){(days[r.date]||(days[r.date]=[])).push(r)});var out=[];Object.keys(days).sort().forEach(function(date){var events=days[date].slice().sort(function(a,b){return parseClockMinutes(date,a.time)-parseClockMinutes(date,b.time)}),pairs=[],open=null,total=0;events.forEach(function(r){if(r.session==='Clock In'){if(open===null)open=r;}else if(r.session==='Clock Out'&&open){var im=parseClockMinutes(date,open.time),om=parseClockMinutes(date,r.time),mins=om-im;if(mins<0)mins+=1440;total+=mins;pairs.push({in:open,out:r,minutes:mins});open=null;}});out.push({date:date,events:events,pairs:pairs,open:open,totalMinutes:total});});return out}
-function periodKey(date,period){var d=new Date(date+'T00:00:00');if(period==='month')return date.slice(0,7);var day=(d.getDay()+6)%7;d.setDate(d.getDate()-day);return d.toISOString().slice(0,10)}
-function render(){if(!current)return;var a=att(),day=a.filter(function(r){return r.uid===current.uid&&r.date===today()}),last=day.length?day[day.length-1]:null,history=a.filter(function(r){return r.uid===current.uid&&(r.session==='Clock In'||r.session==='Clock Out')}).slice(-40).reverse(),rows=dailyRows(),weekly={},monthly={};rows.forEach(function(r){if(r.totalMinutes>0){var w=periodKey(r.date,'week'),mo=periodKey(r.date,'month');weekly[w]=(weekly[w]||0)+r.totalMinutes;monthly[mo]=(monthly[mo]||0)+r.totalMinutes;}});var now=new Date(),weekStart=new Date(now);weekStart.setDate(now.getDate()-((now.getDay()+6)%7));var ws=weekStart.toISOString().slice(0,10),month=today().slice(0,7),daily=rows.reduce(function(n,r){return n+(r.totalMinutes||0)},0);var report='<br><div class="card"><h3>My Hours Report</h3><div class="row"><div class="card"><b>All Recorded</b><h2>'+formatDuration(daily)+'</h2></div><div class="card"><b>This Week</b><h2>'+formatDuration(weekly[ws]||0)+'</h2></div><div class="card"><b>This Month</b><h2>'+formatDuration(monthly[month]||0)+'</h2></div></div><div class="tablewrap"><table><tr><th>Date</th><th>Clock In → Clock Out</th><th>Open Clock In</th><th>Hours & Minutes</th></tr>'+rows.slice().reverse().map(function(r){return '<tr><td>'+esc(r.date)+'</td><td>'+(r.pairs.length?r.pairs.map(function(x){return esc(x.in.time)+' → '+esc(x.out.time)+' ('+formatDuration(x.minutes)+')'}).join('<br>'):'—')+'</td><td>'+(r.open?esc(r.open.time):'—')+'</td><td><b>'+formatDuration(r.totalMinutes)+'</b></td></tr>'}).join('')+'</table></div></div><br><div class="card"><h3>Weekly & Monthly Totals</h3><p><b>Week '+esc(ws)+':</b> '+formatDuration(weekly[ws]||0)+' &nbsp; <b>Month '+esc(month)+':</b> '+formatDuration(monthly[month]||0)+'</p></div>';$('content').innerHTML='<div class="card"><h2>Welcome, '+esc(current.name)+'</h2><p style="text-align:center"><b>Staff ID:</b> '+esc(current.uid)+'</p><div class="stat">'+esc(timeNow())+'</div><div class="row"><button class="green" id="inBtn">Clock In</button><button class="red" id="outBtn" '+((!last||last.session!=='Clock In')?'disabled':'')+'>Clock Out</button></div><br><p style="text-align:center;color:#667085">'+(last&&last.session==='Clock In'?'Currently clocked in since '+esc(last.time):'Ready to clock in. You may clock in and out multiple times each day.')+'</p></div><br><div class="card"><h3>My Recent Attendance</h3><div class="tablewrap"><table><tr><th>Date</th><th>Time</th><th>Action</th></tr>'+history.map(function(r){return '<tr><td>'+esc(r.date)+'</td><td>'+esc(r.time)+'</td><td>'+esc(r.session)+'</td></tr>'}).join('')+'</table></div></div>'+report;$('inBtn').onclick=function(){clock('Clock In')};$('outBtn').onclick=function(){clock('Clock Out')}}
-async function clock(action){
- var a=att(),day=a.filter(function(r){return r.uid===current.uid&&r.date===today()}),last=day.length?day[day.length-1]:null;
- if(action==='Clock In'&&last&&last.session==='Clock In')return toast('You are already clocked in. Clock Out before another Clock In.');
- if(action==='Clock Out'&&(!last||last.session!=='Clock In'))return toast('Please Clock In first.');
- var event={_eventId:'evt-'+Date.now()+'-'+Math.random().toString(36).slice(2),date:today(),time:timeNow(),uid:current.uid,name:current.name,role:'Staff',classDept:current.classDept||'',session:action,status:'Present',scanner:'Staff Portal'};
- try{
-  var r=await fetch(CAC_API_BASE+'/api/attendance/sync',{method:'POST',headers:cloudHeaders(),body:JSON.stringify({value:[event]})});
-  var x=await r.json().catch(function(){return {}});
-  if(r.status===401){try{localStorage.removeItem('anrem_cloud_token')}catch(e){};return toast('Session expired. Please log in again.')}
-  if(!r.ok)throw new Error(x.error||'Unable to save attendance');
-  if(x.state)applyCloudState(x.state);
-  else {a.push(event);cacheSet('rcs_att',a)}
-  toast(action+' saved successfully.');
-  render();
- }catch(e){toast(e.message||'Unable to save attendance. Please check your internet connection.')}
-}
-$('loginForm').onsubmit=function(e){return login(e)};$('eye').onclick=function(){var p=$('staffPass');p.type=p.type==='password'?'text':'password'};$('logout').onclick=logout;restore();
-</script></body></html>
+$('loginForm').onsubmit=function(e){e.preventDefault();login($('username').value.trim().toLowerCase(),$('password').value)}
+$('logout').onclick=logout;
+restore();
+})();
+</script>
+</body>
+</html>
