@@ -109,17 +109,14 @@ var pages=[['dash','Dashboard'],['staff','Create Staff ID Card'],['scanStaff','S
 function isStaffSession(){return !!currentUser&&currentUser.role==='Staff';}
 function makeTabs(){
  var h='';
- pages.forEach(function(p){
-  if(isStaffSession()){
-   if(p[0]==='clock'||p[0]==='dailyReport')h+='<button type="button" data-page="'+p[0]+'">'+p[1]+'</button> ';
-  }else{
-   if(p[0]!=='dailyReport')h+='<button type="button" data-page="'+p[0]+'">'+p[1]+'</button> ';
-  }
- });
+ if(isStaffSession()){
+  h+='<button type="button" data-page="clock">Staff Clock In/Out</button> ';
+  h+='<button type="button" data-page="dailyReport">Daily Activities Report</button> ';
+ }else{
+  pages.forEach(function(p){if(p[0]!=='dailyReport')h+='<button type="button" data-page="'+p[0]+'">'+p[1]+'</button> ';});
+ }
  $('tabs').innerHTML=h;
- Array.prototype.forEach.call($('tabs').querySelectorAll('button'),function(b){
-  b.onclick=function(){nav(this.getAttribute('data-page'))}
- });
+ Array.prototype.forEach.call($('tabs').querySelectorAll('button'),function(b){b.onclick=function(){nav(this.getAttribute('data-page'))}});
 }
 function nav(p){
  stopScan();
@@ -324,7 +321,6 @@ function dailyActivitiesPage(m){
  if(!p)return m.innerHTML='<div class="card"><p>Staff profile could not be found.</p></div>';
  var todayRows=att().filter(function(r){return String(r.uid)===String(p.uid)&&r.date===date&&(r.session==='Clock In'||r.session==='Clock Out')}).sort(function(a,b){return String(a.time||'').localeCompare(String(b.time||''))});
  var last=todayRows.length?todayRows[todayRows.length-1]:null;
- if(!last||last.session!=='Clock Out'){m.innerHTML='<div class="card"><h2>Daily Activities Report</h2><p>You can submit your Daily Activities Report after you have Clocked Out for today.</p><button type="button" id="backToClock">Back to Clock In/Out</button></div>';if($('backToClock'))$('backToClock').onclick=function(){clockPage($('main'))};return;}
  m.innerHTML='<div class="card"><h2>Daily Activities Report</h2><p style="color:#667085">Submit your activities for today. Your report will be sent to Admin and included automatically in your weekly and monthly reports.</p><div class="formgrid">'+
  '<div><label>Name</label><input id="arName" value="'+esc(p.name)+'" readonly></div>'+ 
  '<div><label>Date</label><input id="arDate" type="date" value="'+esc(date)+'" readonly></div>'+ 
@@ -524,11 +520,10 @@ function clockPage(m){
   m.innerHTML='<div class="card"><h3>Staff Clock In/Out</h3><p>Your account is not linked to a registered staff record.</p></div>';return;
  }
  var todayDate=today(),todayRows=att().filter(function(r){return String(r.uid)===String(registered.uid)&&r.date===todayDate&&(r.session==='Clock In'||r.session==='Clock Out')}).sort(function(a,b){return String(a.time||'').localeCompare(String(b.time||''))}),lastToday=todayRows.length?todayRows[todayRows.length-1]:null;
- var reportOption=lastToday&&lastToday.session==='Clock Out'?'<div class="card" style="margin-top:12px"><h3>Daily Activities Report</h3><p>Clock Out is recorded for today. You can now submit your daily activities report to Admin.</p><button type="button" class="green" id="openDailyReport">Give Daily Activities Report</button></div>':'';
- m.innerHTML='<div class="card"><h2>Staff Clock In/Out</h2><h3>'+esc(registered.name)+'</h3><p><b>Staff ID:</b> '+esc(registered.uid)+'</p><h1>'+timeNow()+'</h1><button class="green" id="clockIn">Clock In (Current Time)</button> <button class="red" id="clockOut">Clock Out (Current Time)</button></div>'+reportOption+'<br><div class="card"><h3>My Recent Clock Records</h3><div class="tablewrap"><table><tr><th>Date</th><th>Time</th><th>Action</th></tr>'+att().filter(function(r){return r.uid===registered.uid&&(r.session==='Clock In'||r.session==='Clock Out')}).slice(-20).reverse().map(function(r){return '<tr><td>'+esc(r.date)+'</td><td>'+esc(r.time)+'</td><td>'+esc(r.session)+'</td></tr>'}).join('')+'</table></div></div>';
+
+ m.innerHTML='<div class="card"><h2>Staff Clock In/Out</h2><h3>'+esc(registered.name)+'</h3><p><b>Staff ID:</b> '+esc(registered.uid)+'</p><h1>'+timeNow()+'</h1><button class="green" id="clockIn">Clock In (Current Time)</button> <button class="red" id="clockOut">Clock Out (Current Time)</button></div><br><div class="card"><h3>My Recent Clock Records</h3><div class="tablewrap"><table><tr><th>Date</th><th>Time</th><th>Action</th></tr>'+att().filter(function(r){return r.uid===registered.uid&&(r.session==='Clock In'||r.session==='Clock Out')}).slice(-20).reverse().map(function(r){return '<tr><td>'+esc(r.date)+'</td><td>'+esc(r.time)+'</td><td>'+esc(r.session)+'</td></tr>'}).join('')+'</table></div></div>';
  $('clockIn').onclick=function(){var a=att(),t=timeNow();a.push({date:today(),time:t,uid:registered.uid,name:registered.name,role:'Staff',classDept:registered.classDept||'',session:'Clock In',status:'Present',scanner:'Self'});if(saveAtt(a)){toast('Clock In saved');clockPage($('main'));}};
  $('clockOut').onclick=function(){var a=att(),day=a.filter(function(r){return r.uid===registered.uid&&r.date===today()}),last=day.length?day[day.length-1]:null;if(last&&last.session==='Clock In'){var t=timeNow();a.push({date:today(),time:t,uid:registered.uid,name:registered.name,role:'Staff',classDept:registered.classDept||'',session:'Clock Out',status:'Present',scanner:'Self'});if(saveAtt(a)){toast('Clock Out saved');clockPage($('main'));}}else toast('Clock In first before Clock Out.');};
- if($('openDailyReport'))$('openDailyReport').onclick=function(){dailyActivitiesPage($('main'))};
 }
 async function restoreSession(){
 try{
