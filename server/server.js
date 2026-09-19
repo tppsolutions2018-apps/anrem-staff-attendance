@@ -44,13 +44,16 @@ async function sanitizeStateFor(user){
       rcs_people:(Array.isArray(people)?people:[]).filter(Boolean).map(stripPerson),
       rcs_users:(Array.isArray(allUsers)?allUsers:[]).filter(Boolean).map(safeUser),
       rcs_greports:await getSnapshot('rcs_greports',[]),
-      rcs_att:await getAllAttendance()
+      rcs_att:await getAllAttendance(),
+      anrem_daily_reports:await getSnapshot('anrem_daily_reports',[])
     };
   }
   const uid=String(user.uid||'');
   const mine=(Array.isArray(people)?people:[]).filter(p=>p&&String(p.uid||'')===uid&&normalizeRole(p.role)==='Staff').map(stripPerson);
   const myAtt=uid ? (await pool.query('SELECT payload FROM attendance WHERE uid=$1 ORDER BY created_at ASC',[uid])).rows.map(x=>x.payload) : [];
-  return {rcs_people:mine,rcs_users:(Array.isArray(allUsers)?allUsers:[]).filter(u=>u&&String(u.uid||'')===uid).map(safeUser),rcs_greports:[],rcs_att:myAtt};
+  const allDaily=await getSnapshot('anrem_daily_reports',[]);
+  const myDaily=(Array.isArray(allDaily)?allDaily:[]).filter(r=>r&&String(r.uid||'')===uid);
+  return {rcs_people:mine,rcs_users:(Array.isArray(allUsers)?allUsers:[]).filter(u=>u&&String(u.uid||'')===uid).map(safeUser),rcs_greports:[],rcs_att:myAtt,anrem_daily_reports:myDaily};
 }
 
 async function syncAuthFromUsers(users){
@@ -108,6 +111,7 @@ async function init(){
   if((await pool.query("SELECT 1 FROM snapshots WHERE key='rcs_people'")).rowCount===0) await saveSnapshot('rcs_people',[]);
   if((await pool.query("SELECT 1 FROM snapshots WHERE key='rcs_users'")).rowCount===0) await saveSnapshot('rcs_users',[{name:'Administrator',username:ADMIN_USER,password:'',role:'Admin',active:true}]);
   if((await pool.query("SELECT 1 FROM snapshots WHERE key='rcs_greports'")).rowCount===0) await saveSnapshot('rcs_greports',[]);
+  if((await pool.query("SELECT 1 FROM snapshots WHERE key='anrem_daily_reports'")).rowCount===0) await saveSnapshot('anrem_daily_reports',[]);
   const hash=await bcrypt.hash(ADMIN_PASS,12);
   await pool.query(`INSERT INTO auth(username,password_hash,name,role,uid,active) VALUES($1,$2,'Administrator','Admin',NULL,TRUE)
     ON CONFLICT(username) DO UPDATE SET password_hash=EXCLUDED.password_hash,name='Administrator',role='Admin',uid=NULL,active=TRUE`,[ADMIN_USER,hash]);
@@ -119,6 +123,8 @@ const app=express();
 app.set('trust proxy',1);
 app.use(helmet({contentSecurityPolicy:false}));
 app.use(express.json({limit:'20mb'}));
+
+// Serve the ANREM frontend and static assets such as logo.png
 app.use(express.static(path.join(__dirname,'..','public')));
 app.get('/api/health',async(req,res)=>{try{await pool.query('SELECT 1');res.json({ok:true,service:'ANREM Staff Attendance',database:'postgres',time:new Date().toISOString()})}catch(e){res.status(503).json({ok:false,error:'Database unavailable'})}});
 app.post('/api/login',async(req,res)=>{
@@ -164,48 +170,31 @@ app.post('/api/snapshot/:key',auth,async(req,res)=>{
   try{
     const key=req.params.key;
     const value=Array.isArray(req.body.value)?req.body.value:[];
-
     if(key==='anrem_daily_reports'){
       const incoming=value.filter(r=>r&&String(r.uid||'')===String(req.user.uid||''));
-
       if(req.user.role==='Admin'){
         await saveSnapshot(key,value);
       }else{
         const existing=await getSnapshot(key,[]);
-        const others=(Array.isArray(existing)?existing:[])
-          .filter(r=>r&&String(r.uid||'')!==String(req.user.uid||''));
-
+        const others=(Array.isArray(existing)?existing:[]).filter(r=>r&&String(r.uid||'')!==String(req.user.uid||''));
         await saveSnapshot(key,others.concat(incoming));
       }
-
-      return res.json({
-        ok:true,
-        state:await sanitizeStateFor(req.user)
-      });
+      return res.json({ok:true,state:await sanitizeStateFor(req.user)});
     }
-
-    if(!['rcs_people','rcs_users','rcs_greports'].includes(key)){
-      return res.status(400).json({error:'Invalid key'});
-    }
-
-    if(req.user.role!=='Admin'){
-      return res.status(403).json({error:'Admin only'});
-    }
-
+    if(!['rcs_people','rcs_users','rcs_greports'].includes(key))return res.status(400).json({error:'Invalid key'});
+    if(req.user.role!=='Admin')return res.status(403).json({error:'Admin only'});
     await saveSnapshot(key,value);
-
-    if(key==='rcs_users'){
-      await syncAuthFromUsers(value);
-    }
-
-    res.json({
-      ok:true,
-      state:await sanitizeStateFor(req.user)
-    });
-  }catch(e){
-    console.error(e);
-    res.status(500).json({error:'Unable to save data'})
-  }
+    if(key==='rcs_users')await syncAuthFromUsers(value);
+    res.json({ok:true,state:await sanitizeStateFor(req.user)});
+  }catch(e){console.error(e);res.status(500).json({error:'Unable to save data'})}
+});
+app.post('/api/attendance/sync',auth,async(req,res)=>{
+  try{
+    const incoming=Array.isArray(req.body.value)?req.body.value:[];
+    const allowed=req.user.role==='Admin'?incoming:incoming.filter(r=>r&&String(r.uid||'')===String(req.user.uid||''));
+    await upsertAttendance(allowed);
+    res.json({ok:true,state:await sanitizeStateFor(req.user)});
+  }catch(e){console.error(e);res.status(500).json({error:'Unable to sync attendance'})}
 });
 app.put('/api/attendance/:id',auth,adminOnly,async(req,res)=>{
   try{
@@ -216,80 +205,13 @@ app.put('/api/attendance/:id',auth,adminOnly,async(req,res)=>{
   }catch(e){console.error(e);res.status(500).json({error:'Unable to edit attendance'})}
 });
 app.delete('/api/attendance/:id',auth,adminOnly,async(req,res)=>{try{await pool.query('DELETE FROM attendance WHERE event_id=$1',[String(req.params.id)]);res.json({ok:true,state:await sanitizeStateFor(req.user)})}catch(e){console.error(e);res.status(500).json({error:'Unable to delete attendance'})}});
-app.put('/api/activity-reports/:id',auth,adminOnly,async(req,res)=>{
-  try{
-    const id=String(req.params.id);
-    const current=await getSnapshot('anrem_daily_reports',[]);
-    const reports=Array.isArray(current)?current:[];
-    const index=reports.findIndex(r=>String(r.id)===id);
-
-    if(index<0){
-      return res.status(404).json({error:'Activity report not found'});
-    }
-
-    const old=reports[index];
-    const next=Object.assign({},old,req.body||{});
-
-    if(!next.date || !/^\d{4}-\d{2}-\d{2}$/.test(String(next.date))){
-      return res.status(400).json({error:'Invalid report date'});
-    }
-
-    if(!next.time || !String(next.time).trim()){
-      return res.status(400).json({error:'Report time is required'});
-    }
-
-    next.date=String(next.date);
-    next.time=String(next.time).trim();
-
-    const d=new Date(next.date+'T00:00:00');
-    if(!isNaN(d.getTime())){
-      const day=(d.getDay()+6)%7;
-      d.setDate(d.getDate()-day);
-      next.week=d.toISOString().slice(0,10);
-      next.month=next.date.slice(0,7);
-    }
-
-    reports[index]=next;
-    await saveSnapshot('anrem_daily_reports',reports);
-
-    res.json({
-      ok:true,
-      state:await sanitizeStateFor(req.user)
-    });
-  }catch(e){
-    console.error(e);
-    res.status(500).json({error:'Unable to update activity report'});
-  }
-});
-
-app.delete('/api/activity-reports/:id',auth,adminOnly,async(req,res)=>{
-  try{
-    const id=String(req.params.id);
-    const current=await getSnapshot('anrem_daily_reports',[]);
-    const reports=Array.isArray(current)?current:[];
-    const next=reports.filter(r=>String(r.id)!==id);
-
-    if(next.length===reports.length){
-      return res.status(404).json({error:'Activity report not found'});
-    }
-
-    await saveSnapshot('anrem_daily_reports',next);
-
-    res.json({
-      ok:true,
-      state:await sanitizeStateFor(req.user)
-    });
-  }catch(e){
-    console.error(e);
-    res.status(500).json({error:'Unable to delete activity report'});
-  }
-});
 app.post('/api/import',auth,adminOnly,async(req,res)=>{
   try{
     const incoming=req.body||{};
     if(Array.isArray(incoming.rcs_people))await saveSnapshot('rcs_people',incoming.rcs_people);
     if(Array.isArray(incoming.rcs_users)){await saveSnapshot('rcs_users',incoming.rcs_users);await syncAuthFromUsers(incoming.rcs_users)}
     if(Array.isArray(incoming.rcs_greports))await saveSnapshot('rcs_greports',incoming.rcs_greports);
+    if(Array.isArray(incoming.anrem_daily_reports))await saveSnapshot('anrem_daily_reports',incoming.anrem_daily_reports);
     if(Array.isArray(incoming.rcs_att))await upsertAttendance(incoming.rcs_att);
     res.json({ok:true,state:await sanitizeStateFor(req.user)});
   }catch(e){console.error(e);res.status(500).json({error:'Unable to import backup'})}
@@ -297,7 +219,7 @@ app.post('/api/import',auth,adminOnly,async(req,res)=>{
 app.get('/api/export',auth,adminOnly,async(req,res)=>{
   try{
     const users=(await getSnapshot('rcs_users',[])).map(u=>{const x=Object.assign({},u);delete x.password;delete x.loginPassword;delete x.staffPassword;return x});
-    const payload={rcs_people:await getSnapshot('rcs_people',[]),rcs_users:users,rcs_greports:await getSnapshot('rcs_greports',[]),rcs_att:await getAllAttendance()};
+    const payload={rcs_people:await getSnapshot('rcs_people',[]),rcs_users:users,rcs_greports:await getSnapshot('rcs_greports',[]),anrem_daily_reports:await getSnapshot('anrem_daily_reports',[]),rcs_att:await getAllAttendance()};
     res.setHeader('Content-Type','application/json');res.setHeader('Content-Disposition','attachment; filename="anrem-staff-attendance-backup.json"');res.send(JSON.stringify(payload,null,2));
   }catch(e){console.error(e);res.status(500).json({error:'Unable to export backup'})}
 });
