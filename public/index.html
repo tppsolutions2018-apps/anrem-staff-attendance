@@ -18,7 +18,7 @@ function cloudToken(){try{return localStorage.getItem('anrem_cloud_token')||''}c
 function cloudHeaders(){var h={'Content-Type':'application/json'};var t=cloudToken();if(t)h.Authorization='Bearer '+t;return h}
 function cacheSet(k,v){try{localStorage.setItem(k,JSON.stringify(v));return true}catch(e){console.error('Cache save failed',e);return false}}
 function storeGet(k,d){try{var v=localStorage.getItem(k);return v?JSON.parse(v):d}catch(e){return d}}
-function cloudPush(k,v,applyState){if(!cloudToken()||!CAC_API_BASE)return Promise.resolve(false);var endpoint=k==='rcs_att'?CAC_API_BASE+'/api/attendance/sync':CAC_API_BASE+'/api/snapshot/'+encodeURIComponent(k);return fetch(endpoint,{method:'POST',headers:cloudHeaders(),body:JSON.stringify({value:v})}).then(async function(r){var raw=await r.text();var x=null;try{x=raw?JSON.parse(raw):null}catch(e){if(r.status===401){try{localStorage.removeItem('anrem_cloud_token')}catch(_){ }throw new Error('Session expired. Please log in again.')}throw new Error('Cloud save failed: server returned an invalid response. Please deploy the updated ANREM server.js.')}if(r.status===401){try{localStorage.removeItem('anrem_cloud_token')}catch(e){};throw new Error('Session expired. Please log in again.')}if(!r.ok)throw new Error((x&&x.error)||('Cloud save failed ('+r.status+')'));return x||{}}).then(function(x){if(applyState!==false&&x.state)applyCloudState(x.state);return true}).catch(function(e){console.warn('Cloud sync failed',e);toast(e.message||'Cloud save failed. Please check your internet connection.');return false})}
+function cloudPush(k,v,applyState){if(!cloudToken()||!CAC_API_BASE)return Promise.resolve(false);var endpoint=k==='rcs_att'?CAC_API_BASE+'/api/attendance/sync':CAC_API_BASE+'/api/snapshot/'+encodeURIComponent(k);return fetch(endpoint,{method:'POST',headers:cloudHeaders(),body:JSON.stringify({value:v})}).then(function(r){if(r.status===401){try{localStorage.removeItem('anrem_cloud_token')}catch(e){};throw new Error('Session expired. Please log in again.')}if(!r.ok)throw new Error('Cloud save failed ('+r.status+')');return r.json()}).then(function(x){if(applyState!==false&&x.state)applyCloudState(x.state);return true}).catch(function(e){console.warn('Cloud sync failed',e);toast(e.message||'Cloud save failed. Please check your internet connection.');return false})}
 function storeSet(k,v){try{localStorage.setItem(k,JSON.stringify(v));cloudPush(k,v);return true}catch(e){console.error('Storage save failed for '+k,e);toast('Could not save.');return false}}
 function applyCloudState(st){if(!st)return;Object.keys(st).forEach(function(k){cacheSet(k,st[k])})}
 async function cloudLogin(u,p){if(!CAC_API_BASE)return false;try{var r=await fetch(CAC_API_BASE+'/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})});var x=await r.json();if(!r.ok)throw new Error(x.error||'Login failed');localStorage.setItem('anrem_cloud_token',x.token);applyCloudState(x.state);return x}catch(e){toast(e.message||'Cloud login failed');return false}}
@@ -105,12 +105,16 @@ async function login(){
   currentUser=found;cacheSet('anrem_current_user',found);$('login').classList.add('hide');$('app').classList.remove('hide');$('who').textContent=found.name+' ('+found.role+')';makeTabs();nav(found.role==='Staff'?'clock':'dash');return false;
  }
 function logout(){stopScan();currentUser=null;try{localStorage.removeItem('anrem_current_user')}catch(e){}try{localStorage.removeItem('anrem_cloud_token')}catch(e){}$('app').classList.add('hide');$('login').classList.remove('hide')}
-var pages=[['dash','Dashboard'],['staff','Create Staff ID Card'],['scanStaff','Scan Staff'],['staffRecords','Staff Records'],['clock','Staff Clock In/Out'],['dailyReport','Daily Activities Report'],['reports','Reports'],['settings','Settings']];
+var pages=[['dash','Dashboard'],['staff','Create Staff ID Card'],['scanStaff','Scan Staff'],['staffRecords','Staff Records'],['clock','Staff Clock In/Out'],['reports','Reports'],['settings','Settings']];
 function isStaffSession(){return !!currentUser&&currentUser.role==='Staff';}
 function makeTabs(){
  var h='';
  pages.forEach(function(p){
-  if(!isStaffSession()||p[0]==='clock'||p[0]==='dailyReport')h+='<button type="button" data-page="'+p[0]+'">'+p[1]+'</button> ';
+  if(isStaffSession()){
+   if(p[0]==='clock'||p[0]==='dailyReport')h+='<button type="button" data-page="'+p[0]+'">'+p[1]+'</button> ';
+  }else{
+   if(p[0]!=='dailyReport')h+='<button type="button" data-page="'+p[0]+'">'+p[1]+'</button> ';
+  }
  });
  $('tabs').innerHTML=h;
  Array.prototype.forEach.call($('tabs').querySelectorAll('button'),function(b){
@@ -235,7 +239,7 @@ async function saveProfile(role,old){
      created=latestPeople[pi];
     }
     var ua=users();
-    var duplicate=ua.find(function(u){return String(u.username||'').trim().toLowerCase()===staffUsername && String(u.uid||'')!==String(created.uid||'');});
+    var duplicate=ua.find(function(u){return String(u.username||'').trim().toLowerCase()===staffUsername && (!old || u.uid!==created.uid);});
     if(duplicate){toast('Staff username already exists. Choose another username.');if(btn){btn.disabled=false;btn.textContent=old?'Save Edit':'Save and Create ID';}return;}
     var linked=ua.find(function(u){return u.uid===created.uid;});
     if(!linked && old){linked=ua.find(function(u){return String(u.username||'').trim().toLowerCase()===String(old.uid||'').toLowerCase();});}
@@ -351,14 +355,66 @@ async function submitDailyActivity(){
 }
 function compiledWeeklyReport(uid,week){return activityReports().filter(function(r){return String(r.uid)===String(uid)&&r.week===week}).sort(function(a,b){return (a.date+' '+a.time).localeCompare(b.date+' '+b.time)})}
 function compiledMonthlyWeeks(uid,month){var weeks={};activityReports().filter(function(r){return String(r.uid)===String(uid)&&r.month===month}).forEach(function(r){(weeks[r.week]||(weeks[r.week]=[])).push(r)});return weeks}
-function activityReportCard(r){return '<div class="card activity-report-card" style="margin-top:10px"><p><b>'+esc(r.date)+' '+esc(r.time)+'</b> | Supervisor: '+esc(r.supervisor||'')+' | Mode: '+esc(r.mode||'')+'</p><p><b>Challenges:</b><br>'+esc(r.challenges).replace(/\n/g,'<br>')+'</p><p><b>Achievements:</b><br>'+esc(r.achievements).replace(/\n/g,'<br>')+'</p><p><b>Incidents & Activities:</b><br>'+esc(r.activities).replace(/\n/g,'<br>')+'</p><p><b>Unfinished task:</b> '+esc(r.unfinished)+(r.unfinished==='Yes'?'<br>'+esc(r.unfinishedDetails||'').replace(/\n/g,'<br>'):'')+'</p><div class="row"><button type="button" onclick="editActivityReport(&quot;'+esc(r.id)+'&quot;)">Edit</button><button type="button" class="red" onclick="deleteActivityReport(&quot;'+esc(r.id)+'&quot;)">Delete</button><button type="button" class="light" onclick="downloadActivityPDF(&quot;'+esc(r.id)+'&quot;)">Download PDF</button></div></div>'}
-function activityPrintable(title,rows){var html='<!doctype html><html><head><meta charset="utf-8"><title>'+esc(title)+'</title><style>body{font-family:Arial,sans-serif;padding:28px;color:#111}h1{color:#241075}h2{margin-top:26px;border-bottom:1px solid #ddd;padding-bottom:6px}.report{border:1px solid #ddd;border-radius:12px;padding:14px;margin:14px 0}.meta{color:#444}.actions{margin:20px 0}@media print{.actions{display:none}} </style></head><body><h1>'+esc(title)+'</h1><div class="actions"><button onclick="window.print()">Print / Save as PDF</button></div>'+rows.map(function(r){return '<div class="report"><h2>'+esc(r.date)+' '+esc(r.time)+'</h2><p class="meta"><b>Name:</b> '+esc(r.name||'')+' &nbsp; <b>Job Role:</b> '+esc(r.jobRole||'')+' &nbsp; <b>Supervisor:</b> '+esc(r.supervisor||'')+' &nbsp; <b>Mode:</b> '+esc(r.mode||'')+'</p><p><b>Challenges:</b><br>'+esc(r.challenges||'').replace(/\n/g,'<br>')+'</p><p><b>Achievements:</b><br>'+esc(r.achievements||'').replace(/\n/g,'<br>')+'</p><p><b>Incidents & Activities:</b><br>'+esc(r.activities||'').replace(/\n/g,'<br>')+'</p><p><b>Unfinished Task:</b> '+esc(r.unfinished||'No')+(r.unfinished==='Yes'?'<br>'+esc(r.unfinishedDetails||'').replace(/\n/g,'<br>'):'')+'</p></div>'}).join('')+'</body></html>';var w=window.open('','_blank');if(!w)return toast('Please allow pop-ups to download the PDF');w.document.write(html);w.document.close();setTimeout(function(){w.focus();w.print()},400)}
+function activityReportCard(r){
+ return '<div class="card activity-report-card" style="margin-top:10px" data-activity-id="'+esc(r.id)+'">'+
+ '<p><b>'+esc(r.date)+' '+esc(r.time)+'</b> | Supervisor: '+esc(r.supervisor||'')+' | Mode: '+esc(r.mode||'')+'</p>'+
+ '<p><b>Challenges:</b><br>'+esc(r.challenges||'').replace(/\n/g,'<br>')+'</p>'+
+ '<p><b>Achievements:</b><br>'+esc(r.achievements||'').replace(/\n/g,'<br>')+'</p>'+
+ '<p><b>Incidents & Activities:</b><br>'+esc(r.activities||'').replace(/\n/g,'<br>')+'</p>'+
+ '<p><b>Unfinished task:</b> '+esc(r.unfinished||'')+(r.unfinished==='Yes'?'<br>'+esc(r.unfinishedDetails||'').replace(/\n/g,'<br>'):'')+'</p>'+
+ '<div class="row">'+
+ '<button type="button" data-activity-action="edit" data-id="'+esc(r.id)+'">Edit</button>'+
+ '<button type="button" class="red" data-activity-action="delete" data-id="'+esc(r.id)+'">Delete</button>'+
+ '<button type="button" class="light" data-activity-action="pdf" data-id="'+esc(r.id)+'">Download PDF</button>'+
+ '</div></div>';
+}
+function activityPrintable(title,rows){
+ var html='<!doctype html><html><head><meta charset="utf-8"><title>'+esc(title)+'</title>'+
+ '<style>body{font-family:Arial,sans-serif;padding:28px;color:#111}h1{color:#241075}h2{margin-top:26px;border-bottom:1px solid #ddd;padding-bottom:6px}.report{border:1px solid #ddd;border-radius:12px;padding:14px;margin:14px 0}.meta{color:#444}.actions{margin:20px 0}@media print{.actions{display:none}}</style></head><body>'+
+ '<h1>'+esc(title)+'</h1><div class="actions"><button id="printBtn" type="button">Print / Save as PDF</button></div>'+
+ rows.map(function(r){return '<div class="report"><h2>'+esc(r.date)+' '+esc(r.time)+'</h2>'+
+ '<p class="meta"><b>Name:</b> '+esc(r.name||'')+' &nbsp; <b>Job Role:</b> '+esc(r.jobRole||'')+' &nbsp; <b>Supervisor:</b> '+esc(r.supervisor||'')+' &nbsp; <b>Mode:</b> '+esc(r.mode||'')+'</p>'+
+ '<p><b>Challenges:</b><br>'+esc(r.challenges||'').replace(/\n/g,'<br>')+'</p>'+
+ '<p><b>Achievements:</b><br>'+esc(r.achievements||'').replace(/\n/g,'<br>')+'</p>'+
+ '<p><b>Incidents & Activities:</b><br>'+esc(r.activities||'').replace(/\n/g,'<br>')+'</p>'+
+ '<p><b>Unfinished Task:</b> '+esc(r.unfinished||'No')+(r.unfinished==='Yes'?'<br>'+esc(r.unfinishedDetails||'').replace(/\n/g,'<br>'):'')+'</p></div>'}).join('')+
+ '</body></html>';
+ var w=window.open('about:blank','_blank');
+ if(!w){toast('Please allow pop-ups for the PDF report.');return;}
+ try{
+  w.document.open();w.document.write(html);w.document.close();
+  var pb=w.document.getElementById('printBtn');
+  if(pb)pb.onclick=function(){w.print()};
+  w.focus();
+ }catch(e){try{w.close()}catch(_){};toast('Unable to open the PDF report. '+e.message);}
+}
 function downloadActivityPDF(id){var r=activityReports().find(function(x){return String(x.id)===String(id)});if(r)activityPrintable('ANREM Daily Activity Report — '+(r.name||''),[r])}
 function downloadActivityGroupPDF(uid,key,type){var rows=type==='week'?compiledWeeklyReport(uid,key):activityReports().filter(function(r){return String(r.uid)===String(uid)&&r.month===key}).sort(function(a,b){return (a.date+' '+a.time).localeCompare(b.date+' '+b.time)});var p=people().find(function(x){return String(x.uid)===String(uid)});activityPrintable('ANREM '+(type==='week'?'Weekly':'Monthly')+' Activity Report — '+(p?p.name:'Staff'),rows)}
 async function deleteActivityReport(id){var a=activityReports(),next=a.filter(function(r){return String(r.id)!==String(id)});if(next.length===a.length)return toast('Daily activity report not found');var r=a.find(function(x){return String(x.id)===String(id)});if(!confirm('Delete the daily activity report for '+(r?r.date:'this date')+'?'))return;var ok=await cloudPush('anrem_daily_reports',next,false);if(!ok)return;cacheSet('anrem_daily_reports',next);adminActivityReports();toast('Daily activity report deleted.')}
 function editActivityReport(id){var a=activityReports(),r=a.find(function(x){return String(x.id)===String(id)});if(!r)return toast('Daily activity report not found');var m=$('main');m.innerHTML='<div class="card"><h2>Edit Daily Activity Report</h2><div class="formgrid"><div><label>Name</label><input value="'+esc(r.name||'')+'" readonly></div><div><label>Date</label><input value="'+esc(r.date||'')+'" readonly></div><div><label>Time</label><input value="'+esc(r.time||'')+'" readonly></div><div><label>Job Role</label><input value="'+esc(r.jobRole||'')+'" readonly></div><div><label>Supervisor</label><input value="'+esc(r.supervisor||'')+'" readonly></div><div><label>Mode of Supervision</label><select id="editArMode"><option '+(r.mode==='Onsite'?'selected':'')+'>Onsite</option><option '+(r.mode==='Remote'?'selected':'')+'>Remote</option></select></div><div class="full"><label>Major challenges</label><textarea id="editArChallenges">'+esc(r.challenges||'')+'</textarea></div><div class="full"><label>Major achievements</label><textarea id="editArAchievements">'+esc(r.achievements||'')+'</textarea></div><div class="full"><label>General report on incident and activities</label><textarea id="editArActivities">'+esc(r.activities||'')+'</textarea></div><div><label>Unfinished task?</label><select id="editArUnfinished"><option '+(r.unfinished==='No'?'selected':'')+'>No</option><option '+(r.unfinished==='Yes'?'selected':'')+'>Yes</option></select></div><div class="full"><label>If yes, details</label><textarea id="editArDetails">'+esc(r.unfinishedDetails||'')+'</textarea></div></div><br><button class="green" id="saveEditedActivity">Save Changes</button> <button class="light" id="cancelEditedActivity">Cancel</button></div>';$('cancelEditedActivity').onclick=function(){reportsHub($('main'));setTimeout(adminActivityReports,0)};$('saveEditedActivity').onclick=async function(){r.mode=$('editArMode').value;r.challenges=$('editArChallenges').value.trim();r.achievements=$('editArAchievements').value.trim();r.activities=$('editArActivities').value.trim();r.unfinished=$('editArUnfinished').value;r.unfinishedDetails=$('editArDetails').value.trim();if(!r.challenges||!r.achievements||!r.activities)return toast('Complete the three main report sections');var ok=await cloudPush('anrem_daily_reports',a,false);if(!ok)return;cacheSet('anrem_daily_reports',a);reportsHub($('main'));setTimeout(adminActivityReports,0);toast('Daily activity report updated.')}}
-function editActivityGroup(uid,key,type){var rows=type==='week'?compiledWeeklyReport(uid,key):activityReports().filter(function(r){return String(r.uid)===String(uid)&&r.month===key}).sort(function(a,b){return (a.date+' '+a.time).localeCompare(b.date+' '+b.time)});var p=people().find(function(x){return String(x.uid)===String(uid)});var m=$('main');m.innerHTML='<div class="card"><h2>Edit '+(type==='week'?'Weekly':'Monthly')+' Activity Report</h2><p>This report is generated from the daily reports. Edit the individual daily entries below; the '+(type==='week'?'weekly':'monthly')+' report updates automatically.</p>'+rows.map(activityReportCard).join('')+'<br><button class="light" id="backActivityReports">Back to Staff Activity Reports</button></div>';$('backActivityReports').onclick=function(){reportsHub(m);setTimeout(adminActivityReports,0)}}
-async function deleteActivityGroup(uid,key,type){var a=activityReports(),rows=a.filter(function(r){return String(r.uid)===String(uid)&&(type==='week'?r.week===key:r.month===key)});if(!rows.length)return toast('No activity reports found');var p=people().find(function(x){return String(x.uid)===String(uid)});var label=type==='week'?'week starting '+key:key+' month';if(!confirm('Delete all '+rows.length+' daily activity report(s) in '+label+' for '+(p?p.name:'this Staff')+'?'))return;var ids={};rows.forEach(function(r){ids[String(r.id)]=1});var next=a.filter(function(r){return !ids[String(r.id)]});var ok=await cloudPush('anrem_daily_reports',next,false);if(!ok)return;cacheSet('anrem_daily_reports',next);adminActivityReports();toast((type==='week'?'Weekly':'Monthly')+' activity report deleted.')}
+function editActivityGroup(uid,key,type){
+ var rows=type==='week'?compiledWeeklyReport(uid,key):activityReports().filter(function(r){return String(r.uid)===String(uid)&&r.month===key}).sort(function(a,b){return (a.date+' '+a.time).localeCompare(b.date+' '+b.time)});
+ var m=$('main');
+ m.innerHTML='<div class="card"><h2>Edit '+(type==='week'?'Weekly':'Monthly')+' Activity Report</h2><p>This report is generated from the daily reports. Edit the individual daily entries below; the '+(type==='week'?'weekly':'monthly')+' report updates automatically.</p>'+
+ (rows.length?rows.map(activityReportCard).join(''):'<p>No daily reports found.</p>')+
+ '<br><button class="light" id="backActivityReports">Back to Staff Activity Reports</button></div>';
+ if($('backActivityReports'))$('backActivityReports').onclick=function(){reportsHub($('main'));setTimeout(adminActivityReports,0)};
+ bindActivityActionDelegation(m);
+}
+async function deleteActivityGroup(uid,key,type){
+ var a=activityReports(),rows=a.filter(function(r){return String(r.uid)===String(uid)&&(type==='week'?r.week===key:r.month===key)});
+ if(!rows.length)return toast('No activity reports found');
+ var p=people().find(function(x){return String(x.uid)===String(uid)});
+ var label=type==='week'?'week starting '+key:key+' month';
+ if(!confirm('Delete all '+rows.length+' daily activity report(s) in '+label+' for '+(p?p.name:'this Staff')+'?'))return;
+ var ids={};rows.forEach(function(r){ids[String(r.id)]=1});
+ var next=a.filter(function(r){return !ids[String(r.id)]});
+ var ok=await cloudPush('anrem_daily_reports',next,false);
+ if(!ok)return;
+ cacheSet('anrem_daily_reports',next);
+ adminActivityReports();
+ toast((type==='week'?'Weekly':'Monthly')+' activity report deleted.');
+}
 function activityStaffFolder(p){
  var rows=activityReports().filter(function(r){return String(r.uid)===String(p.uid)}).sort(function(a,b){return (b.date+" "+b.time).localeCompare(a.date+" "+a.time)}),weeks={},months={};rows.forEach(function(r){(weeks[r.week]||(weeks[r.week]=[])).push(r);(months[r.month]||(months[r.month]=[])).push(r)});
  var h='<details class="card"><summary style="cursor:pointer;font-weight:700">'+esc(p.name)+' — '+esc(p.uid)+'</summary><p><b>Job Role:</b> '+esc(p.classDept||'')+' &nbsp; <b>Supervisor:</b> '+esc(p.supervisor||'')+'</p><h4>Daily Reports ('+rows.length+')</h4>';
@@ -369,10 +425,30 @@ function activityStaffFolder(p){
  Object.keys(months).sort().reverse().forEach(function(mo){var mw=compiledMonthlyWeeks(p.uid,mo);h+='<details style="margin:8px 0"><summary>'+esc(mo)+' Monthly Report</summary><div class="row" style="margin:8px 0"><button type="button" data-edit-group="month" data-uid="'+esc(p.uid)+'" data-key="'+esc(mo)+'">Edit Month</button><button type="button" class="red" data-delete-group="month" data-uid="'+esc(p.uid)+'" data-key="'+esc(mo)+'">Delete Month</button><button type="button" class="light" data-pdf-group="month" data-uid="'+esc(p.uid)+'" data-key="'+esc(mo)+'">Download Month PDF</button></div>';Object.keys(mw).sort().forEach(function(w){h+='<div class="card"><b>Week starting '+esc(w)+'</b>'+mw[w].map(activityReportCard).join('')+'</div>'});h+='</details>'});if(!Object.keys(months).length)h+='<p>No monthly reports yet.</p>';
  return h+'</details>';
 }
+function bindActivityActionDelegation(root){
+ if(!root || root._activityActionsBound)return;
+ root._activityActionsBound=true;
+ root.addEventListener('click',function(ev){
+  var b=ev.target.closest ? ev.target.closest('button') : null;
+  if(!b || !root.contains(b))return;
+  var action=b.getAttribute('data-activity-action');
+  if(action){
+   var id=b.getAttribute('data-id');
+   if(action==='edit')return editActivityReport(id);
+   if(action==='delete')return deleteActivityReport(id);
+   if(action==='pdf')return downloadActivityPDF(id);
+  }
+  var type=b.getAttribute('data-edit-group');
+  if(type)return editActivityGroup(b.getAttribute('data-uid'),b.getAttribute('data-key'),type);
+  type=b.getAttribute('data-delete-group');
+  if(type)return deleteActivityGroup(b.getAttribute('data-uid'),b.getAttribute('data-key'),type);
+  type=b.getAttribute('data-pdf-group');
+  if(type)return downloadActivityGroupPDF(b.getAttribute('data-uid'),b.getAttribute('data-key'),type);
+ });
+}
+
 function bindActivityAdminActions(){
- Array.prototype.forEach.call(document.querySelectorAll('[data-edit-group]'),function(b){b.onclick=function(){editActivityGroup(this.getAttribute('data-uid'),this.getAttribute('data-key'),this.getAttribute('data-edit-group'))}});
- Array.prototype.forEach.call(document.querySelectorAll('[data-delete-group]'),function(b){b.onclick=function(){deleteActivityGroup(this.getAttribute('data-uid'),this.getAttribute('data-key'),this.getAttribute('data-delete-group'))}});
- Array.prototype.forEach.call(document.querySelectorAll('[data-pdf-group]'),function(b){b.onclick=function(){downloadActivityGroupPDF(this.getAttribute('data-uid'),this.getAttribute('data-key'),this.getAttribute('data-pdf-group'))}});
+ bindActivityActionDelegation($('reportArea'));
 }
 function adminActivityReports(){var area=$('reportArea'),ps=people().filter(function(p){return normRole(p.role)==='Staff'}).sort(function(a,b){return String(a.name||'').localeCompare(String(b.name||''))});area.innerHTML='<h3>Staff Activity Reports</h3><p style="color:#667085">Each Staff has a folder. Daily reports can be edited, deleted and downloaded separately. Weekly and Monthly reports are generated from the daily reports and can be edited through their daily entries, deleted as a group, or downloaded separately.</p>'+ (ps.length?ps.map(activityStaffFolder).join(''):'<div class="card">No Staff registered.</div>');bindActivityAdminActions();}
 function reportsHub(m){m.innerHTML='<div class="card"><h2>Reports</h2><div class="subtabs"><button id="fr" class="active">Staff Attendance</button><button id="sr">Staff Activity Reports</button><button id="ar">Admin General Reports</button></div><div id="reportArea"></div></div>';$('fr').onclick=function(){setSub('fr');reportArea('Staff')};$('sr').onclick=function(){setSub('sr');adminActivityReports()};$('ar').onclick=function(){setSub('ar');adminReports()};reportArea('Staff')}
