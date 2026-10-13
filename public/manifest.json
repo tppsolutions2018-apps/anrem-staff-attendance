@@ -1,9 +1,10 @@
 {
   "name": "ANREM Staff Attendance",
   "short_name": "ANREM Attendance",
-  "start_url": "/",
+  "start_url": "/staff-login.html",
+  "scope": "/",
   "display": "standalone",
-  "background_color": "#ffffff",
+  "background_color": "#f4f6fb",
   "theme_color": "#241075",
-  "icons": [{"src":"/logo.png","sizes":"512x512","type":"image/png","purpose":"any"}]
+  "description": "ANREM staff attendance and daily activity reports"
 }

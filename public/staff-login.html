@@ -46,7 +46,7 @@ h1,h2,h3{color:var(--navy)}.brand{text-align:center;font-weight:900;color:var(--
 <div class="top">
 <img src="logo.png" alt="ANREM logo">
 <b>ANREM<br>Staff Portal</b>
-<span id="who"></span><div class="spacer"></div>
+<span id="who"></span><div class="spacer"></div><small id="offlineStatus" style="font-weight:800;color:#475467">Checking connection</small>
 <button class="light" id="logout">Logout</button>
 </div>
 <div id="tabs" class="tabs"></div>
@@ -134,25 +134,27 @@ function clockPage(){
 
  $('cin').onclick=function(){
   var a=attendance();
-  a.push({date:today(),time:now(),uid:p.uid,name:p.name,role:'Staff',
-   classDept:p.classDept||'',session:'Clock In',status:'Present',scanner:'Self'});
+  a.push({id:'ANREM-ATT-'+Date.now()+'-'+Math.random().toString(36).slice(2,8),date:today(),time:now(),uid:p.uid,name:p.name,role:'Staff',
+   classDept:p.classDept||'',session:'Clock In',status:'Present',scanner:'Self',offlineCreated:!navigator.onLine});
   saveAttendance(a,'Clock In');
  };
  $('cout').onclick=function(){
   var a=attendance(),day=a.filter(function(r){return String(r.uid)===String(p.uid)&&r.date===today()}),last=day.length?day[day.length-1]:null;
   if(!last||last.session!=='Clock In')return toast('Clock In first before Clock Out.');
-  a.push({date:today(),time:now(),uid:p.uid,name:p.name,role:'Staff',
-   classDept:p.classDept||'',session:'Clock Out',status:'Present',scanner:'Self'});
+  a.push({id:'ANREM-ATT-'+Date.now()+'-'+Math.random().toString(36).slice(2,8),date:today(),time:now(),uid:p.uid,name:p.name,role:'Staff',
+   classDept:p.classDept||'',session:'Clock Out',status:'Present',scanner:'Self',offlineCreated:!navigator.onLine});
   saveAttendance(a,'Clock Out');
  };
 }
 
 async function saveAttendance(a,msg){
+ applyState({rcs_att:a});
+ if(!navigator.onLine){markPending('attendance');toast(msg+' saved on this device. Waiting for internet.');clockPage();return}
  try{
   var r=await fetch(API+'/api/attendance/sync',{method:'POST',headers:headers(),body:JSON.stringify({value:a})});
   var x=await r.json();if(!r.ok)throw new Error(x.error||'Cloud save failed');
-  applyState(x.state||{rcs_att:a});toast(msg+' saved');clockPage();
- }catch(e){toast(e.message||'Cloud save failed')}
+  applyState(x.state||{rcs_att:a});clearPending('attendance');toast(msg+' synced to Admin');clockPage();
+ }catch(e){markPending('attendance');toast(msg+' saved on this device. Sync will retry when online.');clockPage()}
 }
 
 function dailyPage(){
@@ -164,10 +166,10 @@ function dailyPage(){
  '<p class="muted">Complete and submit your daily report to Admin.</p>'+
  '<div class="grid">'+
  '<div><label>Name</label><input id="arName" readonly value="'+esc(p.name)+'"></div>'+
- '<div><label>Date</label><input id="arDate" type="date" readonly value="'+date+'"></div>'+
- '<div><label>Time</label><input id="arTime" readonly value="'+esc(tm)+'"></div>'+
+ '<div><label>Date</label><input id="arDate" type="date" value="'+date+'"></div>'+
+ '<div><label>Time</label><input id="arTime" type="time" value="'+esc(new Date().toTimeString().slice(0,5))+'"></div>'+
  '<div><label>Job Role</label><input id="arRole" readonly value="'+esc(p.classDept||'')+'"></div>'+
- '<div><label>Supervisor</label><input id="arSup" readonly value="'+esc(p.supervisor||'')+'"></div>'+
+ '<div><label>Supervisor</label><input id="arSup" value="'+esc(p.supervisor||'')+'"></div>'+
  '<div><label>Mode of Supervision</label><select id="arMode"><option>Onsite</option><option>Remote</option></select></div>'+
  '<div class="full"><label>What are your major challenges that affected your performance, which needs to be taken into consideration?</label><textarea id="arChallenges"></textarea></div>'+
  '<div class="full"><label>What are your major achievements at work today?</label><textarea id="arAchievements"></textarea></div>'+
@@ -190,20 +192,20 @@ async function submitReport(){
  var r={
   id:'DAR-'+Date.now()+'-'+Math.random().toString(36).slice(2,7),
   uid:p.uid,name:p.name,date:$('arDate').value,time:$('arTime').value,
-  jobRole:p.classDept||'',supervisor:p.supervisor||'',mode:$('arMode').value,
+  jobRole:p.classDept||'',supervisor:$('arSup').value.trim(),mode:$('arMode').value,
   challenges:challenges,achievements:achievements,activities:activities,
   unfinished:unfinished,unfinishedDetails:details,
   week:weekKey($('arDate').value),month:$('arDate').value.slice(0,7)
  };
- var a=reports();a.push(r);
+ var a=reports();a.push(r);applyState({anrem_daily_reports:a});
+ if(!navigator.onLine){markPending('reports');toast('Report saved on this device. Waiting for internet.');nav('daily');return}
  try{
   $('submit').disabled=true;$('submit').textContent='Submitting...';
   var resp=await fetch(API+'/api/snapshot/anrem_daily_reports',{method:'POST',headers:headers(),body:JSON.stringify({value:a})});
   var x=await resp.json();if(!resp.ok)throw new Error(x.error||'Cloud save failed');
-  applyState(x.state||{anrem_daily_reports:a});
-  toast('Daily report submitted to Admin');
-  nav('daily');
- }catch(e){$('submit').disabled=false;$('submit').textContent='Submit Daily Report';toast(e.message||'Cloud save failed')}
+  applyState(x.state||{anrem_daily_reports:a});clearPending('reports');
+  toast('Daily report submitted to Admin');nav('daily');
+ }catch(e){markPending('reports');toast('Report saved on this device. Sync will retry when online.');nav('daily')}
 }
 function weekKey(d){
  var x=new Date(d+'T00:00:00'),day=x.getDay()||7;
@@ -211,10 +213,24 @@ function weekKey(d){
  return x.toISOString().slice(0,10);
 }
 
+function pendingItems(){return stateGet('anrem_offline_pending',[])}
+function markPending(kind){var q=pendingItems();if(q.indexOf(kind)<0)q.push(kind);applyState({anrem_offline_pending:q});updateSyncBadge()}
+function clearPending(kind){var q=pendingItems().filter(function(x){return x!==kind});applyState({anrem_offline_pending:q});updateSyncBadge()}
+function updateSyncBadge(){var q=pendingItems();var el=$('offlineStatus');if(el)el.textContent=(navigator.onLine?'Online':'Offline')+(q.length?( ' • '+q.length+' item type(s) waiting to sync'):' • All synced')}
+async function syncPending(){if(!navigator.onLine||!token()||!pendingItems().length)return;try{
+ var sr=await fetch(API+'/api/state',{headers:headers()});if(!sr.ok)throw new Error('state');var cloud=await sr.json();
+ var localAtt=attendance(),cloudAtt=Array.isArray(cloud.rcs_att)?cloud.rcs_att:[];
+ var key=function(r){return String(r.id||[r.uid,r.date,r.time,r.session].join('|'))};var seen={};cloudAtt.forEach(function(r){seen[key(r)]=1});localAtt.forEach(function(r){if(!seen[key(r)]){cloudAtt.push(r);seen[key(r)]=1}});
+ var localRep=reports(),cloudRep=Array.isArray(cloud.anrem_daily_reports)?cloud.anrem_daily_reports:[];var rseen={};cloudRep.forEach(function(r){rseen[String(r.id)]=1});localRep.forEach(function(r){if(!rseen[String(r.id)]){cloudRep.push(r);rseen[String(r.id)]=1}});
+ if(pendingItems().indexOf('attendance')>=0){var ar=await fetch(API+'/api/attendance/sync',{method:'POST',headers:headers(),body:JSON.stringify({value:cloudAtt})});if(!ar.ok)throw new Error('attendance');var ax=await ar.json();if(ax.state)applyState(ax.state);else applyState({rcs_att:cloudAtt});clearPending('attendance')}
+ if(pendingItems().indexOf('reports')>=0){var rr=await fetch(API+'/api/snapshot/anrem_daily_reports',{method:'POST',headers:headers(),body:JSON.stringify({value:cloudRep})});if(!rr.ok)throw new Error('reports');var rx=await rr.json();if(rx.state)applyState(rx.state);else applyState({anrem_daily_reports:cloudRep});clearPending('reports')}
+ toast('Offline records synchronised');
+ }catch(e){updateSyncBadge()}}
+window.addEventListener('online',function(){updateSyncBadge();syncPending()});window.addEventListener('offline',updateSyncBadge);
 function showApp(){
  $('login').classList.add('hide');$('app').classList.remove('hide');
  $('who').textContent=currentUser.name+' (Staff)';
- makeTabs();nav('clock');
+ makeTabs();nav('clock');updateSyncBadge();if(navigator.onLine)syncPending();
 }
 function logout(){
  currentUser=null;
@@ -228,10 +244,11 @@ async function restore(){
   var r=await fetch(API+'/api/state',{headers:headers()});
   if(!r.ok)throw new Error();
   var x=await r.json();applyState(x);currentUser=saved;showApp();
- }catch(e){logout()}
+ }catch(e){if(!navigator.onLine&&people().length){currentUser=saved;showApp();toast('Offline mode: records will sync when internet returns')}else{currentUser=saved;showApp();toast('Could not refresh cloud data. Saved device data is shown')}}
 }
 $('loginForm').onsubmit=function(e){e.preventDefault();login($('username').value.trim().toLowerCase(),$('password').value)}
 $('logout').onclick=logout;
+if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('/sw.js').catch(function(){})})}
 restore();
 })();
 </script>
