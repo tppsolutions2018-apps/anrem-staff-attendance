@@ -114,39 +114,56 @@ function nav(page){
 function clockPage(){
  var p=staffRecord();
  if(!p){$('main').innerHTML='<div class="card"><h2>Staff record not found</h2><p>Please contact Admin.</p></div>';return}
- var rows=attendance().filter(function(r){
-  return String(r.uid)===String(p.uid)&&(r.session==='Clock In'||r.session==='Clock Out')
+ var rows=attendance().filter(function(r){return String(r.uid)===String(p.uid)&&(r.session==='Clock In'||r.session==='Clock Out')}).sort(function(a,b){return (String(a.date||'')+' '+String(a.time||'')).localeCompare(String(b.date||'')+' '+String(b.time||''))});
+ var byDay={},weekly={},monthly={},total=0;
+ rows.forEach(function(r){(byDay[r.date]||(byDay[r.date]=[])).push(r)});
+ Object.keys(byDay).forEach(function(day){
+  var events=byDay[day],mins=0,open=null;
+  events.forEach(function(ev){
+   if(ev.session==='Clock In'){open=ev}
+   else if(ev.session==='Clock Out'&&open){
+    var a=new Date(day+'T'+to24(open.time)+':00'),b=new Date(day+'T'+to24(ev.time)+':00');
+    var d=Math.max(0,Math.round((b-a)/60000));mins+=d;open=null;
+   }
+  });
+  total+=mins;
+  var dt=new Date(day+'T00:00:00'),dow=(dt.getDay()+6)%7;dt.setDate(dt.getDate()-dow);
+  var wk=dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');
+  var mo=day.slice(0,7);weekly[wk]=(weekly[wk]||0)+mins;monthly[mo]=(monthly[mo]||0)+mins;
+  byDay[day]={events:events,minutes:mins,open:open};
  });
- var todayRows=rows.filter(function(r){return r.date===today()});
- var last=todayRows.length?todayRows[todayRows.length-1]:null;
-
+ function to24(t){var s=String(t||'').trim(),m=s.match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)?$/i);if(!m)return '00:00';var h=Number(m[1]),ap=(m[3]||'').toUpperCase();if(ap==='PM'&&h<12)h+=12;if(ap==='AM'&&h===12)h=0;return String(h).padStart(2,'0')+':'+m[2]}
+ function fmt(n){return Math.floor(n/60)+'h '+(n%60)+'m'}
+ function table(title,obj,fmtMonth){
+  var keys=Object.keys(obj).sort().reverse(),s='<div class="tablewrap"><table><tr><th>'+title+'</th><th>Total Hours & Minutes</th></tr>';
+  keys.forEach(function(k){var label=k;if(fmtMonth){var d=new Date(k+'-01T00:00:00');label=d.toLocaleDateString(undefined,{month:'long',year:'numeric'})}s+='<tr><td>'+esc(label)+'</td><td><b>'+fmt(obj[k])+'</b></td></tr>'});
+  if(!keys.length)s+='<tr><td colspan="2">No completed clock-in/out pairs yet.</td></tr>';
+  return s+'</table></div>';
+ }
+ var recent='<div class="tablewrap"><table><tr><th>Date</th><th>Time</th><th>Action</th></tr>';
+ rows.slice().reverse().slice(0,30).forEach(function(r){recent+='<tr><td>'+esc(r.date)+'</td><td>'+esc(r.time)+'</td><td>'+esc(r.session)+'</td></tr>'});
+ recent+='</table></div>';
+ var daily='<div class="tablewrap"><table><tr><th>Date</th><th>Clock In / Out</th><th>Hours & Minutes</th><th>Status</th></tr>';
+ Object.keys(byDay).sort().reverse().forEach(function(day){var d=byDay[day],pairs=d.events.map(function(e){return esc(e.time)+' — '+esc(e.session)}).join('<br>');daily+='<tr><td>'+esc(day)+'</td><td>'+pairs+'</td><td><b>'+fmt(d.minutes)+'</b></td><td>'+(d.open?'Clock In still open':'Completed')+'</td></tr>'});
+ daily+='</table></div>';
  $('main').innerHTML=
- '<div class="card"><h2>Staff Clock In/Out</h2>'+
- '<h3>'+esc(p.name)+'</h3>'+
- '<p><b>Staff ID:</b> '+esc(p.uid)+'</p>'+
- '<h1>'+now()+'</h1>'+
- '<div class="row"><button class="green" id="cin">Clock In</button><button class="red" id="cout">Clock Out</button></div>'+
- '<p class="muted">You can clock in and out as required.</p></div><br>'+
- '<div class="card"><h3>My Recent Clock Records</h3>'+
- '<div>'+rows.slice(-20).reverse().map(function(r){
-  return '<p><b>'+esc(r.date)+'</b> — '+esc(r.time)+' — '+esc(r.session)+'</p>'
- }).join('')+'</div></div>';
-
+ '<div class="card"><h2>Staff Clock In/Out</h2><h3>'+esc(p.name)+'</h3><p><b>Staff ID:</b> '+esc(p.uid)+'</p><h1>'+now()+'</h1><div class="row"><button class="green" id="cin">Clock In</button><button class="red" id="cout">Clock Out</button></div><p class="muted">You can clock in and out as required.</p></div><br>'+
+ '<details class="card" open><summary style="cursor:pointer;font-weight:800">My Recent Attendance ('+rows.length+' records)</summary>'+recent+'</details><br>'+
+ '<details class="card"><summary style="cursor:pointer;font-weight:800">My Hours Report — '+fmt(total)+'</summary>'+daily+'</details><br>'+
+ '<details class="card"><summary style="cursor:pointer;font-weight:800">Weekly & Monthly Totals</summary><h4>Weekly Totals</h4>'+table('Week Starting',weekly,false)+'<h4>Monthly Totals</h4>'+table('Month',monthly,true)+'</details>';
  $('cin').onclick=function(){
-  var a=attendance();
-  a.push({id:'ANREM-ATT-'+Date.now()+'-'+Math.random().toString(36).slice(2,8),date:today(),time:now(),uid:p.uid,name:p.name,role:'Staff',
-   classDept:p.classDept||'',session:'Clock In',status:'Present',scanner:'Self',offlineCreated:!navigator.onLine});
+  var a=attendance(),todayRows=a.filter(function(r){return String(r.uid)===String(p.uid)&&r.date===today()}).sort(function(x,y){return String(x.time||'').localeCompare(String(y.time||''))}),last=todayRows.length?todayRows[todayRows.length-1]:null;
+  if(last&&last.session==='Clock In')return toast('You have already clocked in. Clock out first.');
+  a.push({id:'ANREM-ATT-'+Date.now()+'-'+Math.random().toString(36).slice(2,8),date:today(),time:now(),uid:p.uid,name:p.name,role:'Staff',classDept:p.classDept||'',session:'Clock In',status:'Present',scanner:'Self',offlineCreated:!navigator.onLine});
   saveAttendance(a,'Clock In');
  };
  $('cout').onclick=function(){
-  var a=attendance(),day=a.filter(function(r){return String(r.uid)===String(p.uid)&&r.date===today()}),last=day.length?day[day.length-1]:null;
+  var a=attendance(),day=a.filter(function(r){return String(r.uid)===String(p.uid)&&r.date===today()}).sort(function(x,y){return String(x.time||'').localeCompare(String(y.time||''))}),last=day.length?day[day.length-1]:null;
   if(!last||last.session!=='Clock In')return toast('Clock In first before Clock Out.');
-  a.push({id:'ANREM-ATT-'+Date.now()+'-'+Math.random().toString(36).slice(2,8),date:today(),time:now(),uid:p.uid,name:p.name,role:'Staff',
-   classDept:p.classDept||'',session:'Clock Out',status:'Present',scanner:'Self',offlineCreated:!navigator.onLine});
+  a.push({id:'ANREM-ATT-'+Date.now()+'-'+Math.random().toString(36).slice(2,8),date:today(),time:now(),uid:p.uid,name:p.name,role:'Staff',classDept:p.classDept||'',session:'Clock Out',status:'Present',scanner:'Self',offlineCreated:!navigator.onLine});
   saveAttendance(a,'Clock Out');
  };
 }
-
 async function saveAttendance(a,msg){
  applyState({rcs_att:a});
  if(!navigator.onLine){markPending('attendance');toast(msg+' saved on this device. Waiting for internet.');clockPage();return}
