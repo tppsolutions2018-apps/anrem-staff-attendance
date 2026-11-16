@@ -177,24 +177,79 @@ app.delete('/api/staff/:uid',auth,adminOnly,async(req,res)=>{
 app.post('/api/snapshot/:key',auth,async(req,res)=>{
   try{
     const key=req.params.key;
-    const value=Array.isArray(req.body.value)?req.body.value:[];
+    const value=Array.isArray(req.body&&req.body.value)?req.body.value:[];
+    const admin=isAdminUser(req.user);
+    const uid=String(req.user.uid||'');
     if(['anrem_daily_reports','anrem_emergency_reports','anrem_leave_requests'].includes(key)){
-      const incoming=value.filter(r=>r&&String(r.uid||'')===String(req.user.uid||''));
-      if(req.user.role==='Admin'){
-        await saveSnapshot(key,value);
-      }else{
-        const existing=await getSnapshot(key,[]);
-        const others=(Array.isArray(existing)?existing:[]).filter(r=>r&&String(r.uid||'')!==String(req.user.uid||''));
-        await saveSnapshot(key,others.concat(incoming));
+      if(admin){
+        await replaceSnapshotLocked(key,value);
+        return res.json({ok:true,state:await sanitizeStateFor(req.user)});
+      }
+      if(!uid)return res.status(403).json({error:'Staff identity is missing'});
+
+      const people=await getSnapshot('rcs_people',[]);
+      const staff=(Array.isArray(people)?people:[]).find(p=>p&&String(p.uid||'')===uid&&normalizeRole(p.role)==='Staff');
+      if(!staff)return res.status(403).json({error:'Active Staff profile not found'});
+
+      if(key==='anrem_daily_reports'){
+        const incoming=value.filter(r=>r&&String(r.uid||'')===uid&&String(r.id||''));
+        await updateSnapshotRecord(key,rows=>{
+          return mergeNewerRecords(rows,incoming);
+        });
+      }else if(key==='anrem_emergency_reports'){
+        const incoming=value.filter(r=>r&&String(r.uid||'')===uid&&String(r.id||''));
+        await updateSnapshotRecord(key,rows=>{
+          const seen=new Set(rows.map(r=>String(r&&r.id||'')));
+          const additions=incoming.filter(r=>!seen.has(String(r.id))).map(r=>({
+            id:String(r.id),
+            uid:uid,
+            name:String(staff.name||''),
+            title:String(r.title||'').trim().slice(0,180),
+            details:String(r.details||'').trim().slice(0,12000),
+            attachments:Array.isArray(r.attachments)?r.attachments:[],
+            createdAt:r.createdAt||new Date().toISOString(),
+            date:r.date||new Date().toISOString().slice(0,10),
+            time:r.time||'',
+            status:'Submitted',
+            syncedAt:new Date().toISOString()
+          }));
+          if(additions.some(r=>!r.title||!r.details))throw requestError('Emergency report title and details are required',400);
+          return rows.concat(additions);
+        });
+      }else if(key==='anrem_leave_requests'){
+        const incoming=value.filter(r=>r&&String(r.uid||'')===uid&&String(r.id||''));
+        await updateSnapshotRecord(key,rows=>{
+          const seen=new Set(rows.map(r=>String(r&&r.id||'')));
+          const additions=incoming.filter(r=>!seen.has(String(r.id))).map(r=>({
+            id:String(r.id),
+            uid:uid,
+            name:String(staff.name||''),
+            staffId:uid,
+            leaveType:String(r.leaveType||'').trim().slice(0,80),
+            startDate:String(r.startDate||'').slice(0,10),
+            endDate:String(r.endDate||'').slice(0,10),
+            reason:String(r.reason||'').trim().slice(0,3000),
+            contact:String(r.contact||'').slice(0,500),
+            attachment:r.attachment||null,
+            createdAt:r.createdAt||new Date().toISOString(),
+            status:'Pending',
+            adminComment:'',
+            offlineCreated:!!r.offlineCreated
+          }));
+          if(additions.some(r=>!r.leaveType||!/^\\d{4}-\\d{2}-\\d{2}$/.test(r.startDate)||!/^\\d{4}-\\d{2}-\\d{2}$/.test(r.endDate)||r.endDate<r.startDate||!r.reason)){
+            throw requestError('Please provide a valid leave type, date range and reason',400);
+          }
+          return rows.concat(additions);
+        });
       }
       return res.json({ok:true,state:await sanitizeStateFor(req.user)});
     }
     if(!['rcs_people','rcs_users','rcs_greports'].includes(key))return res.status(400).json({error:'Invalid key'});
-    if(req.user.role!=='Admin')return res.status(403).json({error:'Admin only'});
-    await saveSnapshot(key,value);
+    if(!admin)return res.status(403).json({error:'Admin only'});
+    await replaceSnapshotLocked(key,value);
     if(key==='rcs_users')await syncAuthFromUsers(value);
     res.json({ok:true,state:await sanitizeStateFor(req.user)});
-  }catch(e){console.error(e);res.status(500).json({error:'Unable to save data'})}
+  }catch(e){console.error(e);res.status(e.status||500).json({error:e.message||'Unable to save data'})}
 });
 
 // ANREM feature parity: Staff emergency reports and leave requests.
@@ -214,6 +269,29 @@ async function updateSnapshotRecord(key,mutator){
   }catch(e){await client.query('ROLLBACK');throw e}finally{client.release()}
 }
 function requestError(message,status){return Object.assign(new Error(message),{status:status||400})}
+function recordVersion(record){
+  if(!record||typeof record!=='object')return 0;
+  const candidates=[record.updatedAt,record.modifiedAt,record.lastModifiedAt,record.submittedAt,record.createdAt,record.timestamp,record.date];
+  for(const value of candidates){
+    if(value==null||value==='')continue;
+    const n=typeof value==='number'?value:Date.parse(String(value));
+    if(Number.isFinite(n))return n;
+  }
+  return 0;
+}
+function mergeNewerRecords(existing,incoming){
+  const byId=new Map();
+  for(const row of existing||[]){const id=String(row&&(row.id||row.reportId)||'');if(id)byId.set(id,row);}
+  for(const row of incoming||[]){
+    const id=String(row&&(row.id||row.reportId)||'');if(!id)continue;
+    const old=byId.get(id);
+    if(!old||recordVersion(row)>=recordVersion(old))byId.set(id,row);
+  }
+  return Array.from(byId.values());
+}
+async function replaceSnapshotLocked(key,value){
+  return updateSnapshotRecord(key,()=>value);
+}
 
 app.patch('/api/emergency/:id',auth,async(req,res)=>{
   try{
