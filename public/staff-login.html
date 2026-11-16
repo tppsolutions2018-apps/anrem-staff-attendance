@@ -164,17 +164,22 @@ function clockPage(){
   if(!keys.length)s+='<tr><td colspan="2">No completed clock-in/out pairs yet.</td></tr>';
   return s+'</table></div>';
  }
- var recent='<div class="tablewrap"><table><tr><th>Date</th><th>Time</th><th>Action</th></tr>';
- rows.slice().reverse().slice(0,30).forEach(function(r){recent+='<tr><td>'+esc(r.date)+'</td><td>'+esc(r.time)+'</td><td>'+esc(r.session)+'</td></tr>'});
+ var recent='<div class="tablewrap"><table><tr><th>Date</th><th>Time</th><th>Action</th><th>Manage</th></tr>';
+ rows.slice().reverse().slice(0,30).forEach(function(r){
+  recent+='<tr><td>'+esc(r.date)+'</td><td>'+esc(r.time)+'</td><td>'+esc(r.session)+'</td><td><button type="button" data-att-edit="'+esc(r._eventId||r.id||'')+'">Edit</button> <button type="button" class="red" data-att-delete="'+esc(r._eventId||r.id||'')+'">Delete</button></td></tr>';
+ });
  recent+='</table></div>';
- var daily='<div class="tablewrap"><table><tr><th>Date</th><th>Clock In / Out</th><th>Hours & Minutes</th><th>Status</th></tr>';
- Object.keys(byDay).sort().reverse().forEach(function(day){var d=byDay[day],pairs=d.events.map(function(e){return esc(e.time)+' — '+esc(e.session)}).join('<br>');daily+='<tr><td>'+esc(day)+'</td><td>'+pairs+'</td><td><b>'+fmt(d.minutes)+'</b></td><td>'+(d.open?'Clock In still open':'Completed')+'</td></tr>'});
- daily+='</table></div>';
- $('main').innerHTML=
- '<div class="card"><h2>Staff Clock In/Out</h2><h3>'+esc(p.name)+'</h3><p><b>Staff ID:</b> '+esc(p.uid)+'</p><h1>'+now()+'</h1><div class="row"><button class="green" id="cin">Clock In</button><button class="red" id="cout">Clock Out</button></div><p class="muted">You can clock in and out as required.</p></div><br>'+
- '<details class="card" open><summary style="cursor:pointer;font-weight:800">My Recent Attendance ('+rows.length+' records)</summary>'+recent+'</details><br>'+
- '<details class="card"><summary style="cursor:pointer;font-weight:800">My Hours Report — '+fmt(total)+'</summary>'+daily+'</details><br>'+
- '<details class="card"><summary style="cursor:pointer;font-weight:800">Weekly & Monthly Totals</summary><h4>Weekly Totals</h4>'+table('Week Starting',weekly,false)+'<h4>Monthly Totals</h4>'+table('Month',monthly,true)+'</details>';
+ $('main').querySelectorAll('[data-att-edit]').forEach(function(b){b.onclick=async function(){
+  var id=b.getAttribute('data-att-edit'),row=attendance().find(function(x){return String(x._eventId||x.id)===String(id)});if(!row)return toast('Attendance record not found.');
+  var date=prompt('Correct date (YYYY-MM-DD):',row.date||today());if(date===null)return;
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date))return toast('Use YYYY-MM-DD date format.');
+  var time=prompt('Correct time:',row.time||now());if(time===null||!time.trim())return;
+  try{var res=await fetch(API+'/api/attendance/'+encodeURIComponent(id),{method:'PUT',headers:headers(),body:JSON.stringify({date:date,time:time.trim()})});var x=await res.json();if(!res.ok)throw new Error(x.error||'Update failed');applyState(x.state);toast('Attendance updated.');clockPage()}catch(e){toast(e.message||'Could not update attendance')}
+ }});
+ $('main').querySelectorAll('[data-att-delete]').forEach(function(b){b.onclick=async function(){
+  var id=b.getAttribute('data-att-delete');if(!confirm('Delete this attendance record? This will also update Admin records.'))return;
+  try{var res=await fetch(API+'/api/attendance/'+encodeURIComponent(id),{method:'DELETE',headers:headers()});var x=await res.json();if(!res.ok)throw new Error(x.error||'Delete failed');applyState(x.state);toast('Attendance record deleted.');clockPage()}catch(e){toast(e.message||'Could not delete attendance')}
+ }});
  $('cin').onclick=function(){
   var a=attendance(),todayRows=a.filter(function(r){return String(r.uid)===String(p.uid)&&r.date===today()}).sort(function(x,y){return String(x.time||'').localeCompare(String(y.time||''))}),last=todayRows.length?todayRows[todayRows.length-1]:null;
   if(last&&last.session==='Clock In')return toast('You have already clocked in. Clock out first.');
