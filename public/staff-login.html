@@ -358,9 +358,10 @@ async function syncPending(){
  if(!navigator.onLine||!token()||!pendingItems().length)return;
  try{
   var uid=String(currentUser&&currentUser.uid||'');if(!uid)throw new Error('Staff identity is missing. Please sign in again.');
+  var localAtt=attendance(),localRep=reports(),localLeave=leaveRequests();
   var sr=await fetch(API+'/api/state',{headers:headers()});if(!sr.ok)throw new Error('Unable to load cloud records');var cloud=await sr.json();
   if(pendingItems().indexOf('attendance')>=0){
-   var localAtt=attendance(),cloudAtt=Array.isArray(cloud.rcs_att)?cloud.rcs_att:[];
+   var cloudAtt=Array.isArray(cloud.rcs_att)?cloud.rcs_att:[];
    var key=function(r){return String(r.id||r._eventId||[r.uid,r.date,r.time,r.session].join('|'))};
    var seen={};cloudAtt.forEach(function(r){seen[key(r)]=1});localAtt.forEach(function(r){if(!seen[key(r)]){cloudAtt.push(r);seen[key(r)]=1}});
    var ar=await fetch(API+'/api/attendance/sync',{method:'POST',headers:headers(),body:JSON.stringify({value:cloudAtt})});
@@ -368,7 +369,7 @@ async function syncPending(){
    if(ax.state)applyState(ax.state);clearPending('attendance');
   }
   if(pendingItems().indexOf('reports')>=0){
-   var localRep=reports(),cloudRep=Array.isArray(cloud.anrem_daily_reports)?cloud.anrem_daily_reports:[];
+   var cloudRep=Array.isArray(cloud.anrem_daily_reports)?cloud.anrem_daily_reports:[];
    var rseen={};cloudRep.forEach(function(r){rseen[String(r.id)]=1});
    localRep.forEach(function(r){var copy=Object.assign({},r,{uid:uid,name:String(currentUser.name||r.name||'')});if(!rseen[String(copy.id)]){cloudRep.push(copy);rseen[String(copy.id)]=1}});
    var rr=await fetch(API+'/api/snapshot/anrem_daily_reports',{method:'POST',headers:headers(),body:JSON.stringify({value:cloudRep})});
@@ -379,7 +380,7 @@ async function syncPending(){
    applyState(rx.state);clearPending('reports');
   }
   if(pendingItems().indexOf('leave')>=0){
-   var localLeave=leaveRequests(),cloudLeave=Array.isArray(cloud.anrem_leave_requests)?cloud.anrem_leave_requests:[];
+   var cloudLeave=Array.isArray(cloud.anrem_leave_requests)?cloud.anrem_leave_requests:[];
    var lseen={};cloudLeave.forEach(function(r){lseen[String(r.id)]=1});
    localLeave.forEach(function(r){var copy=Object.assign({},r,{uid:uid,name:String(currentUser.name||r.name||''),staffId:uid});if(!lseen[String(copy.id)]){cloudLeave.push(copy);lseen[String(copy.id)]=1}});
    var lr=await fetch(API+'/api/snapshot/anrem_leave_requests',{method:'POST',headers:headers(),body:JSON.stringify({value:cloudLeave})});
