@@ -190,14 +190,16 @@ app.post('/api/snapshot/:key',auth,async(req,res)=>{
       const people=await getSnapshot('rcs_people',[]);
       const staff=(Array.isArray(people)?people:[]).find(p=>p&&String(p.uid||'')===uid&&normalizeRole(p.role)==='Staff');
       if(!staff)return res.status(403).json({error:'Active Staff profile not found'});
+      const submitted=value.filter(r=>r&&String(r.id||''));
+      if(submitted.some(r=>String(r.uid||'')!==uid))return res.status(403).json({error:'One or more queued records do not match the signed-in Staff account. Nothing was synchronised; please refresh and retry.'});
 
       if(key==='anrem_daily_reports'){
-        const incoming=value.filter(r=>r&&String(r.uid||'')===uid&&String(r.id||''));
+        const incoming=submitted;
         await updateSnapshotRecord(key,rows=>{
           return mergeNewerRecords(rows,incoming);
         });
       }else if(key==='anrem_emergency_reports'){
-        const incoming=value.filter(r=>r&&String(r.uid||'')===uid&&String(r.id||''));
+        const incoming=submitted;
         await updateSnapshotRecord(key,rows=>{
           const seen=new Set(rows.map(r=>String(r&&r.id||'')));
           const additions=incoming.filter(r=>!seen.has(String(r.id))).map(r=>({
