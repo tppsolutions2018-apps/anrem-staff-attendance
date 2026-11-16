@@ -483,7 +483,14 @@ function bindActivityActionDelegation(root){
 function bindActivityAdminActions(){
  bindActivityActionDelegation($('reportArea'));
 }
-function adminActivityReports(){var area=$('reportArea'),ps=people().filter(function(p){return normRole(p.role)==='Staff'}).sort(function(a,b){return String(a.name||'').localeCompare(String(b.name||''))});area.innerHTML='<h3>Staff Activity Reports</h3><p style="color:#667085">Each Staff has a folder. Daily reports can be edited, deleted and downloaded separately. Weekly and Monthly reports are generated from the daily reports and can be edited through their daily entries, deleted as a group, or downloaded separately.</p>'+ (ps.length?ps.map(activityStaffFolder).join(''):'<div class="card">No Staff registered.</div>');bindActivityAdminActions();}
+function adminActivityReports(){
+ var area=$('reportArea'),ps=people().filter(function(p){return normRole(p.role)==='Staff'}).sort(function(a,b){return String(a.name||'').localeCompare(String(b.name||''))});
+ var rows=activityReports().slice().sort(function(a,b){return String(a.name||'').localeCompare(String(b.name||''))||String(a.date||'').localeCompare(String(b.date||''))});
+ var head='<h3>Staff Activity Reports</h3><p style="color:#667085">Reports are grouped by staff member, week and month. You can download combined or individual reports, edit individual entries, and delete weekly or monthly groups.</p><div class="row"><button type="button" id="activityAllPdf">Download All Staff Activity Reports (PDF)</button></div><br>';
+ area.innerHTML=head+(ps.length?ps.map(activityStaffFolder).join(''):'<div class="card">No Staff registered.</div>');
+ var all=$('activityAllPdf');if(all)all.onclick=function(){if(!rows.length)return toast('No staff activity reports are available.');activityPrintable('ANREM All Staff Weekly Activity Reports',rows)};
+ bindActivityAdminActions();
+}
 function reportsHub(m){
  m.innerHTML='<div class="card"><h2>Reports</h2><div class="subtabs"><button id="fr" class="active">Staff Attendance</button><button id="sr">Staff Activity Reports</button><button id="er">Emergency Reports</button><button id="lr">Leave Requests</button><button id="ar">Admin General Reports</button></div><div id="reportArea"></div></div>';
  $('fr').onclick=function(){setSub('fr');reportArea('Staff')};
