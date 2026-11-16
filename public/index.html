@@ -499,11 +499,12 @@ function renderEmergencyReports(){
  var h='<h3>Emergency Reports</h3><p>Review staff incident reports, preview submitted evidence, and manage records.</p><div class="tablewrap"><table><tr><th>Date / Time</th><th>Staff</th><th>Title / Details</th><th>Evidence</th><th>Manage</th></tr>';
  a.forEach(function(x){
   var evidence=(x.attachments||[]).map(function(f){
-   var data=String(f.data||''),type=String(f.type||'');
-   if(type.indexOf('image/')===0)return '<div><a href="'+esc(data)+'" target="_blank" rel="noopener"><img src="'+esc(data)+'" alt="'+esc(f.name||'Emergency image')+'" style="max-width:150px;max-height:120px;object-fit:contain"></a><br>'+esc(f.name||'Image')+'</div>';
-   if(type.indexOf('audio/')===0||/voice-recording/i.test(f.name||''))return '<div>'+esc(f.name||'Voice recording')+'<audio controls preload="none" style="display:block;max-width:220px" src="'+esc(data)+'"></audio></div>';
-   if(type.indexOf('video/')===0)return '<div>'+esc(f.name||'Video')+'<video controls preload="none" style="display:block;max-width:220px;max-height:140px" src="'+esc(data)+'"></video></div>';
-   return '<a href="'+esc(data)+'" target="_blank" rel="noopener">'+esc(f.name||'Attachment')+'</a>';
+   var data=String(f.data||''),type=String(f.type||''),filename=String(f.name||'Attachment').replace(/[\\\\/:*?"<>|]/g,'_');
+   var download=data?'<br><a href="'+esc(data)+'" download="'+esc(filename)+'" style="display:inline-block;margin:5px 0;padding:5px 10px;border:1px solid #64748b;border-radius:5px;text-decoration:none;font-weight:600">Download</a>':'<br><span>Download unavailable: attachment data missing</span>';
+   if(type.indexOf('image/')===0)return '<div><a href="'+esc(data)+'" target="_blank" rel="noopener"><img src="'+esc(data)+'" alt="'+esc(f.name||'Emergency image')+'" style="max-width:150px;max-height:120px;object-fit:contain"></a><br>'+esc(f.name||'Image')+download+'</div>';
+   if(type.indexOf('audio/')===0||/voice-recording/i.test(f.name||''))return '<div>'+esc(f.name||'Voice recording')+'<audio controls preload="none" style="display:block;max-width:220px" src="'+esc(data)+'"></audio>'+download+'</div>';
+   if(type.indexOf('video/')===0)return '<div>'+esc(f.name||'Video')+'<video controls preload="none" style="display:block;max-width:220px;max-height:140px" src="'+esc(data)+'"></video>'+download+'</div>';
+   return '<div><a href="'+esc(data)+'" target="_blank" rel="noopener">'+esc(f.name||'Attachment')+'</a>'+download+'</div>';
   }).join('<br>');
   h+='<tr><td>'+esc(x.createdAt||x.date||'')+'</td><td>'+esc(x.name||'')+' ('+esc(x.uid||'')+')</td><td><b>'+esc(x.title||'')+'</b><br>'+esc(x.details||'')+'</td><td>'+(evidence||'No attachments')+'</td><td><button data-er-edit-admin="'+esc(x.id)+'">Edit</button> <button class="red" data-er-delete-admin="'+esc(x.id)+'">Delete</button></td></tr>';
  });
