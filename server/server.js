@@ -188,6 +188,93 @@ app.post('/api/snapshot/:key',auth,async(req,res)=>{
     res.json({ok:true,state:await sanitizeStateFor(req.user)});
   }catch(e){console.error(e);res.status(500).json({error:'Unable to save data'})}
 });
+
+// ANREM feature parity: Staff emergency reports and leave requests.
+// These routes keep each report collection scoped by authenticated UID,
+// while only Admin users can review/decide all staff requests.
+async function updateSnapshotRecord(key,mutator){
+  const client=await pool.connect();
+  try{
+    await client.query('BEGIN');
+    await client.query('INSERT INTO snapshots(key,value) VALUES($1,$2::jsonb) ON CONFLICT(key) DO NOTHING',[key,'[]']);
+    const q=await client.query('SELECT value FROM snapshots WHERE key=$1 FOR UPDATE',[key]);
+    const rows=q.rowCount&&Array.isArray(q.rows[0].value)?q.rows[0].value:[];
+    const next=await mutator(rows);
+    await client.query('UPDATE snapshots SET value=$2::jsonb WHERE key=$1',[key,JSON.stringify(next)]);
+    await client.query('COMMIT');
+    return next;
+  }catch(e){await client.query('ROLLBACK');throw e}finally{client.release()}
+}
+function requestError(message,status){return Object.assign(new Error(message),{status:status||400})}
+
+app.patch('/api/emergency/:id',auth,async(req,res)=>{
+  try{
+    const id=String(req.params.id||'');
+    await updateSnapshotRecord('anrem_emergency_reports',rows=>{
+      const r=rows.find(x=>x&&String(x.id)===id);
+      if(!r)throw requestError('Emergency report not found',404);
+      if(!isAdminUser(req.user)&&String(r.uid||'')!==String(req.user.uid||''))throw requestError('You can edit only your own emergency reports',403);
+      const body=req.body||{};
+      if(body.title!==undefined)r.title=String(body.title).trim().slice(0,180);
+      if(body.details!==undefined)r.details=String(body.details).trim().slice(0,12000);
+      if(body.attachments!==undefined&&Array.isArray(body.attachments))r.attachments=body.attachments;
+      r.updatedAt=new Date().toISOString();
+      return rows;
+    });
+    res.json({ok:true,state:await sanitizeStateFor(req.user)});
+  }catch(e){res.status(e.status||500).json({error:e.message||'Unable to update emergency report'})}
+});
+app.delete('/api/emergency/:id',auth,async(req,res)=>{
+  try{
+    const id=String(req.params.id||'');
+    await updateSnapshotRecord('anrem_emergency_reports',rows=>{
+      const r=rows.find(x=>x&&String(x.id)===id);
+      if(!r)throw requestError('Emergency report not found',404);
+      if(!isAdminUser(req.user)&&String(r.uid||'')!==String(req.user.uid||''))throw requestError('You can delete only your own emergency reports',403);
+      return rows.filter(x=>!x||String(x.id)!==id);
+    });
+    res.json({ok:true,state:await sanitizeStateFor(req.user)});
+  }catch(e){res.status(e.status||500).json({error:e.message||'Unable to delete emergency report'})}
+});
+app.patch('/api/leave/:id',auth,async(req,res)=>{
+  try{
+    const id=String(req.params.id||'');
+    await updateSnapshotRecord('anrem_leave_requests',rows=>{
+      const r=rows.find(x=>x&&String(x.id)===id);
+      if(!r)throw requestError('Leave request not found',404);
+      if(isAdminUser(req.user)){
+        const action=String((req.body||{}).action||'');
+        if(action==='reopen'){
+          if(!['approved','rejected'].includes(String(r.status||'').toLowerCase()))throw requestError('Only an approved or rejected request can be reopened',409);
+          r.status='Pending';r.adminComment='';r.reviewedAt=null;r.reopenedAt=new Date().toISOString();
+        }else if(action==='approve'||action==='reject'){
+          if(String(r.status||'Pending').toLowerCase()!=='pending')throw requestError('Reopen this request before changing its decision',409);
+          r.status=action==='approve'?'Approved':'Rejected';
+          r.adminComment=String((req.body||{}).comment||'').slice(0,2000);
+          r.reviewedAt=new Date().toISOString();
+        }else throw requestError('Invalid administrator action',400);
+      }else{
+        if(String(r.uid||'')!==String(req.user.uid||''))throw requestError('You can manage only your own leave requests',403);
+        const action=String((req.body||{}).action||'');
+        if(action==='cancel'){
+          if(String(r.status||'Pending').toLowerCase()!=='pending')throw requestError('Only pending requests can be cancelled',409);
+          r.status='Cancelled';r.cancelledAt=new Date().toISOString();
+        }else if(action==='amend'){
+          if(String(r.status||'Pending').toLowerCase()!=='pending')throw requestError('Only pending requests can be amended',409);
+          const b=req.body||{};
+          if(b.leaveType!==undefined)r.leaveType=String(b.leaveType).slice(0,80);
+          if(b.startDate!==undefined)r.startDate=String(b.startDate).slice(0,10);
+          if(b.endDate!==undefined)r.endDate=String(b.endDate).slice(0,10);
+          if(b.reason!==undefined)r.reason=String(b.reason).slice(0,3000);
+          if(b.contact!==undefined)r.contact=String(b.contact).slice(0,500);
+        }else throw requestError('Invalid staff action',400);
+      }
+      return rows;
+    });
+    res.json({ok:true,state:await sanitizeStateFor(req.user)});
+  }catch(e){res.status(e.status||500).json({error:e.message||'Unable to update leave request'})}
+});
+
 app.post('/api/attendance/sync',auth,async(req,res)=>{
   try{
     const incoming=Array.isArray(req.body.value)?req.body.value:[];
