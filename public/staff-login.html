@@ -94,9 +94,30 @@ function staffRecord(){
  });
 }
 
+
+function emergencyReports(){return stateGet('anrem_emergency_reports',[])}
+function emergencyQueue(){return stateGet('anrem_emergency_queue',[])}
+function leaveRequests(){return stateGet('anrem_leave_requests',[])}
+async function syncEmergencyQueue(){
+ if(!navigator.onLine||!token())return;
+ var q=emergencyQueue();if(!q.length)return;
+ try{
+  var st=await fetch(API+'/api/state',{headers:headers()});if(!st.ok)throw new Error('state');
+  var cloud=await st.json(),current=Array.isArray(cloud.anrem_emergency_reports)?cloud.anrem_emergency_reports:[];
+  var seen={};current.forEach(function(x){seen[String(x.id)]=1});
+  q.forEach(function(x){if(!seen[String(x.id)])current.push(x)});
+  var res=await fetch(API+'/api/snapshot/anrem_emergency_reports',{method:'POST',headers:headers(),body:JSON.stringify({value:current})});
+  var out=await res.json();if(!res.ok)throw new Error(out.error||'Emergency sync failed');
+  applyState(out.state);applyState({anrem_emergency_queue:[]});
+ }catch(e){updateSyncBadge()}
+}
+
 function makeTabs(){
  $('tabs').innerHTML=
   '<button data-page="clock">Staff Clock In/Out</button>'+
+  '<button data-page="weekly">Weekly Activity Report</button>'+
+  '<button data-page="emergency">Emergency Report</button>'+
+  '<button data-page="leave">Leave Request</button>'+
   '<button data-page="daily">Daily Activities Report</button>';
  Array.prototype.forEach.call($('tabs').querySelectorAll('button'),function(b){
   b.onclick=function(){nav(this.getAttribute('data-page'))}
@@ -109,6 +130,9 @@ function nav(page){
  });
  if(page==='clock')clockPage();
  if(page==='daily')dailyPage();
+ if(page==='weekly')weeklyPage();
+ if(page==='emergency')emergencyPage();
+ if(page==='leave')leavePage();
 }
 
 function clockPage(){
@@ -172,6 +196,52 @@ async function saveAttendance(a,msg){
   var x=await r.json();if(!r.ok)throw new Error(x.error||'Cloud save failed');
   applyState(x.state||{rcs_att:a});clearPending('attendance');toast(msg+' synced to Admin');clockPage();
  }catch(e){markPending('attendance');toast(msg+' saved on this device. Sync will retry when online.');clockPage()}
+}
+
+
+function mondayOf(d){var x=new Date(d+'T12:00:00'),day=x.getDay()||7;x.setDate(x.getDate()-day+1);return x.toISOString().slice(0,10)}
+function weeklyPage(){
+ var p=staffRecord();if(!p){$('main').innerHTML='<div class="card">Staff record not found.</div>';return}
+ var arr=reports().filter(function(x){return String(x.uid)===String(p.uid)}).sort(function(a,b){return String(b.date||'').localeCompare(String(a.date||''))});
+ var h='<div class="card"><h2>Weekly Activity Report</h2><p class="muted">Submit one summary of your work for the week.</p><label>Name</label><input readonly value="'+esc(p.name)+'"><br><br><label>Week Starting (Monday)</label><input id="wDate" type="date" value="'+mondayOf(today())+'"><br><br><label>Time</label><input id="wTime" type="time" value="'+new Date().toTimeString().slice(0,5)+'"><br><br><label>Job Role</label><input readonly value="'+esc(p.classDept||'')+'"><br><br><label>Supervisor Name</label><input id="wSup" value="'+esc(p.supervisor||'')+'"><br><br><label>What major challenges affected your performance during this week?</label><textarea id="wChallenges"></textarea><br><br><label>Weekly summary of incidents and activities completed according to your job role:</label><textarea id="wGeneral"></textarea><br><br><label>Do you have unfinished tasks that need to be completed next week?</label><select id="wUnfinished"><option>No</option><option>Yes</option></select><br><br><label>Mode of Supervision</label><select id="wMode"><option>Onsite</option><option>Remote</option></select><br><br><label>If yes, give details of tasks to carry forward</label><textarea id="wDetails"></textarea><br><br><button id="weeklySubmit" class="green">Submit Weekly Report</button></div><br><div class="card"><h3>My Submitted Weekly Reports</h3>';
+ if(arr.length){h+='<div class="tablewrap"><table><tr><th>Week Starting</th><th>Time</th><th>Supervision</th><th>Summary</th></tr>'+arr.map(function(x){return '<tr><td>'+esc(x.date)+'</td><td>'+esc(x.time)+'</td><td>'+esc(x.supervision||'')+'</td><td>'+esc(x.general||'').slice(0,140)+'</td></tr>'}).join('')+'</table></div>'}else h+='<p>No weekly reports submitted yet.</p>';
+ h+='</div>';$('main').innerHTML=h;
+ $('weeklySubmit').onclick=async function(){
+  var date=$('wDate').value,challenge=$('wChallenges').value.trim(),general=$('wGeneral').value.trim(),unfinished=$('wUnfinished').value,details=$('wDetails').value.trim();
+  if(!date||!challenge||!general)return toast('Complete the week starting date, challenges and weekly summary.');
+  if(unfinished==='Yes'&&!details)return toast('Give details of unfinished tasks.');
+  var start=mondayOf(date),end=new Date(start+'T12:00:00');end.setDate(end.getDate()+6);
+  var row={id:'ANREM-WR-'+Date.now()+'-'+Math.random().toString(36).slice(2,7),uid:p.uid,name:p.name,date:start,week:start,weekEnd:end.toISOString().slice(0,10),period:'weekly',time:$('wTime').value,jobRole:p.classDept||'',supervisor:$('wSup').value.trim(),challenges:challenge,general:general,unfinished:unfinished,unfinishedDetails:details,supervision:$('wMode').value,month:start.slice(0,7)};
+  var a=reports();a.push(row);applyState({anrem_daily_reports:a});
+  if(!navigator.onLine){markPending('reports');toast('Weekly report saved locally and queued for sync.');weeklyPage();return}
+  try{var res=await fetch(API+'/api/snapshot/anrem_daily_reports',{method:'POST',headers:headers(),body:JSON.stringify({value:a})});var out=await res.json();if(!res.ok)throw new Error(out.error||'Unable to submit report');applyState(out.state);clearPending('reports');toast('Weekly report submitted to Admin.');weeklyPage()}
+  catch(e){markPending('reports');toast('Weekly report saved locally and queued for sync.');weeklyPage()}
+ };
+}
+function fileData(file,maxBytes){
+ return new Promise(function(resolve,reject){if(!file)return resolve(null);if(file.size>maxBytes)return reject(new Error('Attachment is too large'));var r=new FileReader();r.onload=function(){resolve({name:file.name,type:file.type,data:String(r.result)})};r.onerror=reject;r.readAsDataURL(file)});
+}
+function emergencyPage(){
+ var p=staffRecord();if(!p){$('main').innerHTML='<div class="card">Staff record not found.</div>';return}
+ var arr=emergencyReports().filter(function(x){return String(x.uid)===String(p.uid)}).sort(function(a,b){return String(b.createdAt||'').localeCompare(String(a.createdAt||''))});
+ var h='<div class="card"><h2>Emergency Report</h2><p>Urgent incidents are sent to Admin. Name, Staff ID, date and time are added automatically.</p><label>Incident title</label><input id="erTitle"><br><br><label>Emergency details</label><textarea id="erDetails"></textarea><br><br><label>Voice recording (optional)</label><input id="erVoice" type="file" accept="audio/*" capture><br><br><label>Attach photo, video or document</label><input id="erFiles" type="file" accept="image/*,video/*,audio/*,.pdf,.doc,.docx" multiple><br><br><button id="erSubmit" class="red">Submit Emergency Report</button></div><br><div class="card"><h3>My Emergency Reports</h3>';
+ if(arr.length){h+='<div class="tablewrap"><table><tr><th>Date</th><th>Title</th><th>Status</th><th>Action</th></tr>'+arr.map(function(x){return '<tr><td>'+esc(x.createdAt||'')+'</td><td>'+esc(x.title||'')+'</td><td>'+esc(x.status||'Submitted/Pending Sync')+'</td><td><button data-er-edit="'+esc(x.id)+'">Edit</button> <button class="red" data-er-delete="'+esc(x.id)+'">Delete</button></td></tr>'}).join('')+'</table></div>'}else h+='<p>No emergency reports yet.</p>';
+ h+='</div>';$('main').innerHTML=h;
+ $('erSubmit').onclick=async function(){var title=$('erTitle').value.trim(),details=$('erDetails').value.trim();if(!title||!details)return toast('Enter an incident title and details.');try{var files=[];for(var f of Array.from($('erFiles').files||[])){var x=await fileData(f,3*1024*1024);if(x)files.push(x)}var voice=$('erVoice').files&&$('erVoice').files[0];if(voice){var v=await fileData(voice,3*1024*1024);if(v)files.push(v)}var row={id:'ANREM-ER-'+Date.now(),uid:p.uid,name:p.name,title:title,details:details,attachments:files,createdAt:new Date().toISOString(),date:today(),time:now(),status:'Queued'};var all=emergencyReports();all.push(row);applyState({anrem_emergency_reports:all});var q=emergencyQueue();q.push(row);applyState({anrem_emergency_queue:q});await syncEmergencyQueue();toast(navigator.onLine?'Emergency report saved / synced.':'Saved locally; will sync when online.');emergencyPage()}catch(e){toast(e.message||'Emergency report not submitted')}};
+ $('main').querySelectorAll('[data-er-edit]').forEach(function(b){b.onclick=async function(){var row=emergencyReports().find(function(x){return String(x.id)===b.getAttribute('data-er-edit')});if(!row)return;var title=prompt('Edit title:',row.title||'');if(title===null)return;var details=prompt('Edit details:',row.details||'');if(details===null)return;await emergencyChange(row.id,'PATCH',{title:title,details:details})}});
+ $('main').querySelectorAll('[data-er-delete]').forEach(function(b){b.onclick=function(){if(confirm('Delete this emergency report?'))emergencyChange(b.getAttribute('data-er-delete'),'DELETE')}});
+}
+async function emergencyChange(id,method,body){
+ try{var res=await fetch(API+'/api/emergency/'+encodeURIComponent(id),{method:method,headers:headers(),body:body?JSON.stringify(body):undefined});var x=await res.json();if(!res.ok)throw new Error(x.error||'Unable to update report');applyState(x.state);toast('Emergency report updated.');emergencyPage()}
+ catch(e){toast(e.message||'Unable to update emergency report')}
+}
+function leavePage(){
+ var p=staffRecord();if(!p){$('main').innerHTML='<div class="card">Staff record not found.</div>';return}
+ var arr=leaveRequests().filter(function(x){return String(x.uid)===String(p.uid)}).sort(function(a,b){return String(b.createdAt||'').localeCompare(String(a.createdAt||''))});
+ var h='<div class="card"><h2>Staff Leave Request</h2><label>Leave type</label><select id="lvType"><option value="">Select leave type</option><option>Annual Leave</option><option>Casual Leave</option><option>Sick Leave</option><option>Compassionate Leave</option><option>Maternity Leave</option><option>Paternity Leave</option><option>Study Leave</option><option>Other</option></select><br><br><div class="row"><div style="flex:1"><label>Start date</label><input id="lvStart" type="date"></div><div style="flex:1"><label>End date</label><input id="lvEnd" type="date"></div></div><br><label>Reason for leave</label><textarea id="lvReason"></textarea><br><br><label>Contact address / phone while on leave (optional)</label><input id="lvContact"><br><br><label>Supporting document (optional, max 2MB)</label><input id="lvFile" type="file" accept="image/*,.pdf,.doc,.docx"><br><br><button id="lvSubmit" class="red">Submit Leave Request</button></div><br><div class="card"><h3>My Leave Requests</h3>';
+ if(arr.length){h+='<div class="tablewrap"><table><tr><th>Submitted</th><th>Leave Type</th><th>Period</th><th>Status</th><th>Admin Comment</th></tr>'+arr.map(function(x){return '<tr><td>'+esc(x.createdAt||'')+'</td><td>'+esc(x.leaveType||'')+'</td><td>'+esc(x.startDate||'')+' to '+esc(x.endDate||'')+'</td><td><b>'+esc(x.status||'Pending')+'</b></td><td>'+esc(x.adminComment||'')+'</td></tr>'}).join('')+'</table></div>'}else h+='<p>No leave requests submitted.</p>';
+ h+='</div>';$('main').innerHTML=h;
+ $('lvSubmit').onclick=async function(){var type=$('lvType').value,start=$('lvStart').value,end=$('lvEnd').value,reason=$('lvReason').value.trim();if(!type||!start||!end||!reason)return toast('Complete the leave type, dates and reason.');if(end<start)return toast('End date cannot be earlier than start date.');var attachment=null,f=$('lvFile').files&&$('lvFile').files[0];if(f){try{attachment=await fileData(f,2*1024*1024)}catch(e){return toast(e.message)}}var row={id:'ANREM-LV-'+Date.now(),uid:p.uid,name:p.name,staffId:p.uid,leaveType:type,startDate:start,endDate:end,reason:reason,contact:$('lvContact').value.trim(),attachment:attachment,createdAt:new Date().toISOString(),status:'Pending',adminComment:''};var all=leaveRequests();all.push(row);applyState({anrem_leave_requests:all});try{var res=await fetch(API+'/api/snapshot/anrem_leave_requests',{method:'POST',headers:headers(),body:JSON.stringify({value:all})});var x=await res.json();if(!res.ok)throw new Error(x.error||'Unable to submit leave request');applyState(x.state);toast('Leave request submitted to Admin.');leavePage()}catch(e){toast(e.message||'Leave request not submitted')}};
 }
 
 function dailyPage(){
@@ -243,11 +313,11 @@ async function syncPending(){if(!navigator.onLine||!token()||!pendingItems().len
  if(pendingItems().indexOf('reports')>=0){var rr=await fetch(API+'/api/snapshot/anrem_daily_reports',{method:'POST',headers:headers(),body:JSON.stringify({value:cloudRep})});if(!rr.ok)throw new Error('reports');var rx=await rr.json();if(rx.state)applyState(rx.state);else applyState({anrem_daily_reports:cloudRep});clearPending('reports')}
  toast('Offline records synchronised');
  }catch(e){updateSyncBadge()}}
-window.addEventListener('online',function(){updateSyncBadge();syncPending()});window.addEventListener('offline',updateSyncBadge);
+window.addEventListener('online',function(){updateSyncBadge();syncPending();syncEmergencyQueue()});window.addEventListener('offline',updateSyncBadge);
 function showApp(){
  $('login').classList.add('hide');$('app').classList.remove('hide');
  $('who').textContent=currentUser.name+' (Staff)';
- makeTabs();nav('clock');updateSyncBadge();if(navigator.onLine)syncPending();
+ makeTabs();nav('clock');updateSyncBadge();if(navigator.onLine){syncPending();syncEmergencyQueue();}
 }
 function logout(){
  currentUser=null;
