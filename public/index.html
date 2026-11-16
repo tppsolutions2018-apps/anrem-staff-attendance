@@ -406,20 +406,14 @@ function activityPrintable(title,rows){
  '<style>body{font-family:Arial,sans-serif;padding:28px;color:#111}h1{color:#241075}h2{margin-top:26px;border-bottom:1px solid #ddd;padding-bottom:6px}.report{border:1px solid #ddd;border-radius:12px;padding:14px;margin:14px 0}.meta{color:#444}.actions{margin:20px 0}@media print{.actions{display:none}}</style></head><body>'+
  '<h1>'+esc(title)+'</h1><div class="actions"><button id="printBtn" type="button">Print / Save as PDF</button></div>'+
  rows.map(function(r){return '<div class="report"><h2>'+esc(r.date)+' '+esc(r.time)+'</h2>'+
- '<p class="meta"><b>Name:</b> '+esc(r.name||'')+' &nbsp; <b>Job Role:</b> '+esc(r.jobRole||'')+' &nbsp; <b>Supervisor:</b> '+esc(r.supervisor||'')+' &nbsp; <b>Mode:</b> '+esc(r.mode||'')+'</p>'+
- '<p><b>Challenges:</b><br>'+esc(r.challenges||'').replace(/\n/g,'<br>')+'</p>'+
- '<p><b>Achievements:</b><br>'+esc(r.achievements||'').replace(/\n/g,'<br>')+'</p>'+
- '<p><b>Incidents & Activities:</b><br>'+esc(r.activities||'').replace(/\n/g,'<br>')+'</p>'+
- '<p><b>Unfinished Task:</b> '+esc(r.unfinished||'No')+(r.unfinished==='Yes'?'<br>'+esc(r.unfinishedDetails||'').replace(/\n/g,'<br>'):'')+'</p></div>'}).join('')+
+ '<p class="meta"><b>Name:</b> '+esc(r.name||'')+' &nbsp; <b>Job Role:</b> '+esc(r.jobRole||'')+' &nbsp; <b>Supervisor:</b> '+esc(r.supervisor||'')+' &nbsp; <b>Mode:</b> '+esc(r.mode||r.supervision||'')+'</p>'+
+ '<p><b>Challenges:</b><br>'+esc(r.challenges||'').replace(/\\n/g,'<br>')+'</p>'+
+ '<p><b>Weekly Summary / Activities:</b><br>'+esc(r.general||r.activities||'').replace(/\\n/g,'<br>')+'</p>'+
+ '<p><b>Achievements:</b><br>'+esc(r.achievements||'').replace(/\\n/g,'<br>')+'</p>'+
+ '<p><b>Unfinished Task:</b> '+esc(r.unfinished||'No')+(r.unfinished==='Yes'?'<br>'+esc(r.unfinishedDetails||'').replace(/\\n/g,'<br>'):'')+'</p></div>'}).join('')+
  '</body></html>';
- var w=window.open('about:blank','_blank');
- if(!w){toast('Please allow pop-ups for the PDF report.');return;}
- try{
-  w.document.open();w.document.write(html);w.document.close();
-  var pb=w.document.getElementById('printBtn');
-  if(pb)pb.onclick=function(){w.print()};
-  w.focus();
- }catch(e){try{w.close()}catch(_){};toast('Unable to open the PDF report. '+e.message);}
+ var w=window.open('about:blank','_blank');if(!w){toast('Please allow pop-ups for the PDF report.');return;}
+ try{w.document.open();w.document.write(html);w.document.close();var pb=w.document.getElementById('printBtn');if(pb)pb.onclick=function(){w.print()};w.focus()}catch(e){try{w.close()}catch(_){};toast('Unable to open the PDF report. '+e.message)}
 }
 function downloadActivityPDF(id){var r=activityReports().find(function(x){return String(x.id)===String(id)});if(r)activityPrintable('ANREM Daily Activity Report — '+(r.name||''),[r])}
 function downloadActivityGroupPDF(uid,key,type){var rows=type==='week'?compiledWeeklyReport(uid,key):activityReports().filter(function(r){return String(r.uid)===String(uid)&&r.month===key}).sort(function(a,b){return (a.date+' '+a.time).localeCompare(b.date+' '+b.time)});var p=people().find(function(x){return String(x.uid)===String(uid)});activityPrintable('ANREM '+(type==='week'?'Weekly':'Monthly')+' Activity Report — '+(p?p.name:'Staff'),rows)}
