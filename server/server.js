@@ -45,7 +45,9 @@ async function sanitizeStateFor(user){
       rcs_users:(Array.isArray(allUsers)?allUsers:[]).filter(Boolean).map(safeUser),
       rcs_greports:await getSnapshot('rcs_greports',[]),
       rcs_att:await getAllAttendance(),
-      anrem_daily_reports:await getSnapshot('anrem_daily_reports',[])
+      anrem_daily_reports:await getSnapshot('anrem_daily_reports',[]),
+      anrem_emergency_reports:await getSnapshot('anrem_emergency_reports',[]),
+      anrem_leave_requests:await getSnapshot('anrem_leave_requests',[])
     };
   }
   const uid=String(user.uid||'');
@@ -53,7 +55,11 @@ async function sanitizeStateFor(user){
   const myAtt=uid ? (await pool.query('SELECT payload FROM attendance WHERE uid=$1 ORDER BY created_at ASC',[uid])).rows.map(x=>x.payload) : [];
   const allDaily=await getSnapshot('anrem_daily_reports',[]);
   const myDaily=(Array.isArray(allDaily)?allDaily:[]).filter(r=>r&&String(r.uid||'')===uid);
-  return {rcs_people:mine,rcs_users:(Array.isArray(allUsers)?allUsers:[]).filter(u=>u&&String(u.uid||'')===uid).map(safeUser),rcs_greports:[],rcs_att:myAtt,anrem_daily_reports:myDaily};
+  const emergencies=await getSnapshot('anrem_emergency_reports',[]);
+  const myEmergencies=(Array.isArray(emergencies)?emergencies:[]).filter(r=>r&&String(r.uid||'')===uid);
+  const leaveRequests=await getSnapshot('anrem_leave_requests',[]);
+  const myLeaveRequests=(Array.isArray(leaveRequests)?leaveRequests:[]).filter(r=>r&&String(r.uid||'')===uid);
+  return {rcs_people:mine,rcs_users:(Array.isArray(allUsers)?allUsers:[]).filter(u=>u&&String(u.uid||'')===uid).map(safeUser),rcs_greports:[],rcs_att:myAtt,anrem_daily_reports:myDaily,anrem_emergency_reports:myEmergencies,anrem_leave_requests:myLeaveRequests};
 }
 
 async function syncAuthFromUsers(users){
@@ -112,6 +118,7 @@ async function init(){
   if((await pool.query("SELECT 1 FROM snapshots WHERE key='rcs_users'")).rowCount===0) await saveSnapshot('rcs_users',[{name:'Administrator',username:ADMIN_USER,password:'',role:'Admin',active:true}]);
   if((await pool.query("SELECT 1 FROM snapshots WHERE key='rcs_greports'")).rowCount===0) await saveSnapshot('rcs_greports',[]);
   if((await pool.query("SELECT 1 FROM snapshots WHERE key='anrem_daily_reports'")).rowCount===0) await saveSnapshot('anrem_daily_reports',[]);
+  for(const key of ['anrem_emergency_reports','anrem_leave_requests']) await pool.query('INSERT INTO snapshots(key,value) VALUES($1,$2::jsonb) ON CONFLICT(key) DO NOTHING',[key,'[]']);
   const hash=await bcrypt.hash(ADMIN_PASS,12);
   await pool.query(`INSERT INTO auth(username,password_hash,name,role,uid,active) VALUES($1,$2,'Administrator','Admin',NULL,TRUE)
     ON CONFLICT(username) DO UPDATE SET password_hash=EXCLUDED.password_hash,name='Administrator',role='Admin',uid=NULL,active=TRUE`,[ADMIN_USER,hash]);
@@ -170,7 +177,7 @@ app.post('/api/snapshot/:key',auth,async(req,res)=>{
   try{
     const key=req.params.key;
     const value=Array.isArray(req.body.value)?req.body.value:[];
-    if(key==='anrem_daily_reports'){
+    if(['anrem_daily_reports','anrem_emergency_reports','anrem_leave_requests'].includes(key)){
       const incoming=value.filter(r=>r&&String(r.uid||'')===String(req.user.uid||''));
       if(req.user.role==='Admin'){
         await saveSnapshot(key,value);
@@ -299,6 +306,8 @@ app.post('/api/import',auth,adminOnly,async(req,res)=>{
     if(Array.isArray(incoming.rcs_users)){await saveSnapshot('rcs_users',incoming.rcs_users);await syncAuthFromUsers(incoming.rcs_users)}
     if(Array.isArray(incoming.rcs_greports))await saveSnapshot('rcs_greports',incoming.rcs_greports);
     if(Array.isArray(incoming.anrem_daily_reports))await saveSnapshot('anrem_daily_reports',incoming.anrem_daily_reports);
+    if(Array.isArray(incoming.anrem_emergency_reports))await saveSnapshot('anrem_emergency_reports',incoming.anrem_emergency_reports);
+    if(Array.isArray(incoming.anrem_leave_requests))await saveSnapshot('anrem_leave_requests',incoming.anrem_leave_requests);
     if(Array.isArray(incoming.rcs_att))await upsertAttendance(incoming.rcs_att);
     res.json({ok:true,state:await sanitizeStateFor(req.user)});
   }catch(e){console.error(e);res.status(500).json({error:'Unable to import backup'})}
@@ -306,7 +315,7 @@ app.post('/api/import',auth,adminOnly,async(req,res)=>{
 app.get('/api/export',auth,adminOnly,async(req,res)=>{
   try{
     const users=(await getSnapshot('rcs_users',[])).map(u=>{const x=Object.assign({},u);delete x.password;delete x.loginPassword;delete x.staffPassword;return x});
-    const payload={rcs_people:await getSnapshot('rcs_people',[]),rcs_users:users,rcs_greports:await getSnapshot('rcs_greports',[]),anrem_daily_reports:await getSnapshot('anrem_daily_reports',[]),rcs_att:await getAllAttendance()};
+    const payload={rcs_people:await getSnapshot('rcs_people',[]),rcs_users:users,rcs_greports:await getSnapshot('rcs_greports',[]),anrem_daily_reports:await getSnapshot('anrem_daily_reports',[]),anrem_emergency_reports:await getSnapshot('anrem_emergency_reports',[]),anrem_leave_requests:await getSnapshot('anrem_leave_requests',[]),rcs_att:await getAllAttendance()};
     res.setHeader('Content-Type','application/json');res.setHeader('Content-Disposition','attachment; filename="anrem-staff-attendance-backup.json"');res.send(JSON.stringify(payload,null,2));
   }catch(e){console.error(e);res.status(500).json({error:'Unable to export backup'})}
 });
