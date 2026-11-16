@@ -17,6 +17,7 @@ if(!DATABASE_URL) throw new Error('DATABASE_URL must be set to a Render PostgreS
 const pool=new Pool({connectionString:DATABASE_URL,max:10,idleTimeoutMillis:30000});
 
 function normalizeRole(r){const s=String(r||'').trim().toLowerCase();return s==='teacher'||s==='staff'?'Staff':s==='admin'||s==='administrator'?'Admin':s==='student'?'Student':r}
+function isAdminUser(user){return normalizeRole(user&&user.role)==='Admin'}
 function safeUser(u){if(!u||typeof u!=='object')return null;const x=Object.assign({},u);delete x.password;delete x.loginPassword;delete x.staffPassword;return x}
 function stripPerson(p){if(!p||typeof p!=='object')return p;const x=Object.assign({},p);delete x.loginPassword;delete x.staffPassword;return x}
 function issue(user){return jwt.sign({username:user.username,role:user.role,uid:user.uid||null},JWT_SECRET,{expiresIn:'12h'})}
@@ -290,13 +291,31 @@ app.post('/api/attendance/sync',auth,async(req,res)=>{
     res.json({ok:true,state:await sanitizeStateFor(req.user)});
   }catch(e){console.error(e);res.status(500).json({error:'Unable to sync attendance'})}
 });
-app.put('/api/attendance/:id',auth,adminOnly,async(req,res)=>{
+app.put('/api/attendance/:id',auth,async(req,res)=>{
+  const client=await pool.connect();
   try{
-    const id=String(req.params.id);const q=await pool.query('SELECT payload FROM attendance WHERE event_id=$1',[id]);if(!q.rowCount)return res.status(404).json({error:'Attendance record not found'});
-    const next=Object.assign({},q.rows[0].payload,req.body||{},{_eventId:id});
-    await pool.query('UPDATE attendance SET uid=$1,payload=$2::jsonb WHERE event_id=$3',[String(next.uid||''),JSON.stringify(next),id]);
+    await client.query('BEGIN');
+    const id=String(req.params.id);
+    const q=await client.query('SELECT payload FROM attendance WHERE event_id=$1 FOR UPDATE',[id]);
+    if(!q.rowCount){await client.query('ROLLBACK');return res.status(404).json({error:'Attendance record not found'});}
+    const old=q.rows[0].payload||{};
+    const admin=isAdminUser(req.user);
+    if(!admin&&String(old.uid||'')!==String(req.user.uid||'')){await client.query('ROLLBACK');return res.status(403).json({error:'You can only edit your own attendance'});}
+    const allowed=admin?(req.body||{}):{date:req.body&&req.body.date,time:req.body&&req.body.time};
+    const next=Object.assign({},old,allowed,{_eventId:id,uid:old.uid,name:old.name,role:old.role});
+    await client.query('UPDATE attendance SET uid=$1,payload=$2::jsonb WHERE event_id=$3',[String(next.uid||''),JSON.stringify(next),id]);
+    await client.query('COMMIT');
     res.json({ok:true,state:await sanitizeStateFor(req.user)});
-  }catch(e){console.error(e);res.status(500).json({error:'Unable to edit attendance'})}
+  }catch(e){await client.query('ROLLBACK');console.error(e);res.status(500).json({error:'Unable to edit attendance'});}
+  finally{client.release()}
+});
+app.delete('/api/attendance/:id',auth,async(req,res)=>{
+  try{
+    const id=String(req.params.id),admin=isAdminUser(req.user);
+    const result=await pool.query('DELETE FROM attendance WHERE event_id=$1 AND ($2::boolean OR uid=$3)',[id,admin,String(req.user.uid||'')]);
+    if(!result.rowCount)return res.status(404).json({error:'Attendance record not found or not owned by this Staff member'});
+    res.json({ok:true,state:await sanitizeStateFor(req.user)});
+  }catch(e){console.error(e);res.status(500).json({error:'Unable to delete attendance'})}
 });
 app.delete('/api/attendance/:id',auth,adminOnly,async(req,res)=>{try{await pool.query('DELETE FROM attendance WHERE event_id=$1',[String(req.params.id)]);res.json({ok:true,state:await sanitizeStateFor(req.user)})}catch(e){console.error(e);res.status(500).json({error:'Unable to delete attendance'})}});
 app.post('/api/import',auth,adminOnly,async(req,res)=>{
