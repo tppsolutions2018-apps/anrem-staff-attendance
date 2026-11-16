@@ -13,6 +13,7 @@ input,select,textarea{width:100%;padding:13px;border:1px solid var(--line);borde
 textarea{min-height:120px}label{font-size:13px;color:#475467;font-weight:800}.hide{display:none!important}
 .center{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:18px}
 .card{background:#fff;border:1px solid var(--line);border-radius:22px;padding:18px;box-shadow:0 8px 25px #00000010}
+.accordion{margin-top:12px;padding:0;overflow:hidden}.accordion summary{list-style:none;cursor:pointer;padding:17px 18px;font-weight:900;color:var(--navy);display:flex;align-items:center;justify-content:space-between;gap:12px}.accordion summary::-webkit-details-marker{display:none}.accordion summary:after{content:'+';font-size:22px;line-height:1;color:var(--navy)}.accordion[open] summary:after{content:'−'}.accordion .accordion-body{padding:0 18px 18px}.accordion summary:focus-visible{outline:3px solid #f58220;outline-offset:-3px;border-radius:18px}
 .login{max-width:450px;width:100%}.logo{width:125px;height:125px;object-fit:contain}
 h1,h2,h3{color:var(--navy)}.brand{text-align:center;font-weight:900;color:var(--navy);font-size:21px}.sub{text-align:center;font-weight:900;color:var(--red);margin-bottom:16px}
 .top{position:sticky;top:0;z-index:5;background:#fff;border-bottom:1px solid var(--line);padding:10px;display:flex;align-items:center;gap:10px}
@@ -164,10 +165,11 @@ function clockPage(){
   if(!keys.length)s+='<tr><td colspan="2">No completed clock-in/out pairs yet.</td></tr>';
   return s+'</table></div>';
  }
- var recent='<div class="tablewrap"><table><tr><th>Date</th><th>Time</th><th>Action</th><th>Manage</th></tr>';
+ var recent='<div class="tablewrap"><table><tr><th>Date</th><th>Time</th><th>Action</th></tr>';
  rows.slice().reverse().slice(0,30).forEach(function(r){
-  recent+='<tr><td>'+esc(r.date)+'</td><td>'+esc(r.time)+'</td><td>'+esc(r.session)+'</td><td><button type="button" data-att-edit="'+esc(r._eventId||r.id||'')+'">Edit</button> <button type="button" class="red" data-att-delete="'+esc(r._eventId||r.id||'')+'">Delete</button></td></tr>';
+  recent+='<tr><td>'+esc(r.date)+'</td><td>'+esc(r.time)+'</td><td>'+esc(r.session)+'</td></tr>';
  });
+ if(!rows.length)recent+='<tr><td colspan="3">No attendance records yet.</td></tr>';
  recent+='</table></div>';
  var todayRows=rows.filter(function(r){return r.date===today()}),lastToday=todayRows.length?todayRows[todayRows.length-1]:null;
  var clockedIn=!!lastToday&&lastToday.session==='Clock In';
@@ -177,10 +179,10 @@ function clockPage(){
   '<div class="row"><button type="button" class="green" id="cin" '+(clockedIn?'disabled':'')+'>Clock In</button>'+
   '<button type="button" class="red" id="cout" '+(!clockedIn?'disabled':'')+'>Clock Out</button></div>'+
   '<p class="muted">'+(clockedIn?'You are currently clocked in. Please clock out when your shift ends.':(lastToday&&lastToday.session==='Clock Out'?'Your clock-out has been recorded for today.':'You have not clocked in today.'))+'</p></div>'+
-  '<div class="card" style="margin-top:12px"><h3>My Hours Report</h3><h2>'+fmt(total)+'</h2><p class="muted">Total completed hours recorded</p></div>'+
-  '<div class="card" style="margin-top:12px"><h3>Weekly Totals</h3>'+table('Week Starting',weekly,false)+'</div>'+
-  '<div class="card" style="margin-top:12px"><h3>Monthly Totals</h3>'+table('Month',monthly,true)+'</div>'+
-  '<div class="card" style="margin-top:12px"><h3>My Recent Attendance</h3>'+recent+'</div>';
+  '<details class="card accordion"><summary>My Recent Attendance</summary><div class="accordion-body">'+recent+'</div></details>'+
+  '<details class="card accordion"><summary>My Hours Report</summary><div class="accordion-body"><h2>'+fmt(total)+'</h2><p class="muted">Total completed hours recorded</p></div></details>'+
+  '<details class="card accordion"><summary>Weekly Totals</summary><div class="accordion-body">'+table('Week Starting',weekly,false)+'</div></details>'+
+  '<details class="card accordion"><summary>Monthly Totals</summary><div class="accordion-body">'+table('Month',monthly,true)+'</div></details>';
  $('main').querySelectorAll('[data-att-edit]').forEach(function(b){b.onclick=async function(){
   var id=b.getAttribute('data-att-edit'),row=attendance().find(function(x){return String(x._eventId||x.id)===String(id)});if(!row)return toast('Attendance record not found.');
   var date=prompt('Correct date (YYYY-MM-DD):',row.date||today());if(date===null)return;
