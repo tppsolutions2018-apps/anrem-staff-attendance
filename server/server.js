@@ -236,7 +236,7 @@ app.post('/api/snapshot/:key',auth,async(req,res)=>{
             adminComment:'',
             offlineCreated:!!r.offlineCreated
           }));
-          if(additions.some(r=>!r.leaveType||!/^\\d{4}-\\d{2}-\\d{2}$/.test(r.startDate)||!/^\\d{4}-\\d{2}-\\d{2}$/.test(r.endDate)||r.endDate<r.startDate||!r.reason)){
+          if(additions.some(r=>!r.leaveType||!/^\d{4}-\d{2}-\d{2}$/.test(r.startDate)||!/^\d{4}-\d{2}-\d{2}$/.test(r.endDate)||r.endDate<r.startDate||!r.reason)){
             throw requestError('Please provide a valid leave type, date range and reason',400);
           }
           return rows.concat(additions);
