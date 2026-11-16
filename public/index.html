@@ -386,8 +386,8 @@ async function submitDailyActivity(){
  if(!cloudOk){if(btn){btn.disabled=false;btn.textContent='Submit Daily Report'}return;}
  clockPage($('main'));toast('Daily report submitted to Admin');
 }
-function compiledWeeklyReport(uid,week){return activityReports().filter(function(r){return String(r.uid)===String(uid)&&r.week===week}).sort(function(a,b){return (a.date+' '+a.time).localeCompare(b.date+' '+b.time)})}
-function compiledMonthlyWeeks(uid,month){var weeks={};activityReports().filter(function(r){return String(r.uid)===String(uid)&&r.month===month}).forEach(function(r){(weeks[r.week]||(weeks[r.week]=[])).push(r)});return weeks}
+function compiledWeeklyReport(uid,week){return activityReports().filter(function(r){return String(r.uid)===String(uid)&&(r.week||r.weekStart||r.date)===week}).sort(function(a,b){return (a.date+' '+a.time).localeCompare(b.date+' '+b.time)})}
+function compiledMonthlyWeeks(uid,month){var weeks={};activityReports().filter(function(r){var w=r.week||r.weekStart||r.date||'',m=r.month||(w?w.slice(0,7):'');return String(r.uid)===String(uid)&&m===month}).forEach(function(r){var w=r.week||r.weekStart||r.date||'';(weeks[w]||(weeks[w]=[])).push(r)});return weeks}
 function activityReportCard(r){
  var summary=r.general||r.activities||'';
  return '<div class="card activity-report-card" style="margin-top:10px" data-activity-id="'+esc(r.id)+'">'+
