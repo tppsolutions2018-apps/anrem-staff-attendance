@@ -118,8 +118,7 @@ function makeTabs(){
   '<button data-page="clock">Staff Clock In/Out</button>'+
   '<button data-page="weekly">Weekly Activity Report</button>'+
   '<button data-page="emergency">Emergency Report</button>'+
-  '<button data-page="leave">Leave Request</button>'+
-  '<button data-page="daily">Daily Activities Report</button>';
+  '<button data-page="leave">Leave Request</button>';
  Array.prototype.forEach.call($('tabs').querySelectorAll('button'),function(b){
   b.onclick=function(){nav(this.getAttribute('data-page'))}
  });
@@ -130,7 +129,6 @@ function nav(page){
   b.classList.toggle('active',b.getAttribute('data-page')===page)
  });
  if(page==='clock')clockPage();
- if(page==='daily')dailyPage();
  if(page==='weekly')weeklyPage();
  if(page==='emergency')emergencyPage();
  if(page==='leave')leavePage();
@@ -284,7 +282,7 @@ function leavePage(){
   var id=b.getAttribute('data-lv-cancel');if(!confirm('Cancel this pending leave request?'))return;
   try{var res=await fetch(API+'/api/leave/'+encodeURIComponent(id),{method:'PATCH',headers:headers(),body:JSON.stringify({action:'cancel'})});var x=await res.json();if(!res.ok)throw new Error(x.error||'Unable to cancel request');applyState(x.state);toast('Leave request cancelled.');leavePage()}catch(e){toast(e.message||'Unable to cancel request')}
  }});
- $('lvSubmit').onclick=async function(){var type=$('lvType').value,start=$('lvStart').value,end=$('lvEnd').value,reason=$('lvReason').value.trim();if(!type||!start||!end||!reason)return toast('Complete the leave type, dates and reason.');if(end<start)return toast('End date cannot be earlier than start date.');var attachment=null,f=$('lvFile').files&&$('lvFile').files[0];if(f){try{attachment=await fileData(f,2*1024*1024)}catch(e){return toast(e.message)}}var row={id:'ANREM-LV-'+Date.now(),uid:p.uid,name:p.name,staffId:p.uid,leaveType:type,startDate:start,endDate:end,reason:reason,contact:$('lvContact').value.trim(),attachment:attachment,createdAt:new Date().toISOString(),status:'Pending',adminComment:''};var all=leaveRequests();all.push(row);applyState({anrem_leave_requests:all});try{var res=await fetch(API+'/api/snapshot/anrem_leave_requests',{method:'POST',headers:headers(),body:JSON.stringify({value:all})});var x=await res.json();if(!res.ok)throw new Error(x.error||'Unable to submit leave request');applyState(x.state);toast('Leave request submitted to Admin.');leavePage()}catch(e){toast(e.message||'Leave request not submitted')}};
+ $('lvSubmit').onclick=async function(){var type=$('lvType').value,start=$('lvStart').value,end=$('lvEnd').value,reason=$('lvReason').value.trim();if(!type||!start||!end||!reason)return toast('Complete the leave type, dates and reason.');if(end<start)return toast('End date cannot be earlier than start date.');var attachment=null,f=$('lvFile').files&&$('lvFile').files[0];if(f){try{attachment=await fileData(f,2*1024*1024)}catch(e){return toast(e.message)}}var row={id:'ANREM-LV-'+Date.now()+'-'+Math.random().toString(36).slice(2,7),uid:p.uid,name:p.name,staffId:p.uid,leaveType:type,startDate:start,endDate:end,reason:reason,contact:$('lvContact').value.trim(),attachment:attachment,createdAt:new Date().toISOString(),status:'Pending',adminComment:'',offlineCreated:!navigator.onLine};var all=leaveRequests();all.push(row);applyState({anrem_leave_requests:all});if(!navigator.onLine){markPending('leave');toast('Leave request saved on this device and queued for Admin sync.');leavePage();return}try{var res=await fetch(API+'/api/snapshot/anrem_leave_requests',{method:'POST',headers:headers(),body:JSON.stringify({value:all})});var x=await res.json();if(!res.ok)throw new Error(x.error||'Unable to submit leave request');applyState(x.state);clearPending('leave');toast('Leave request submitted to Admin.');leavePage()}catch(e){markPending('leave');toast('Leave request saved locally and queued for Admin sync.');leavePage()}}
 }
 
 function dailyPage(){
@@ -351,9 +349,13 @@ async function syncPending(){if(!navigator.onLine||!token()||!pendingItems().len
  var sr=await fetch(API+'/api/state',{headers:headers()});if(!sr.ok)throw new Error('state');var cloud=await sr.json();
  var localAtt=attendance(),cloudAtt=Array.isArray(cloud.rcs_att)?cloud.rcs_att:[];
  var key=function(r){return String(r.id||[r.uid,r.date,r.time,r.session].join('|'))};var seen={};cloudAtt.forEach(function(r){seen[key(r)]=1});localAtt.forEach(function(r){if(!seen[key(r)]){cloudAtt.push(r);seen[key(r)]=1}});
- var localRep=reports(),cloudRep=Array.isArray(cloud.anrem_daily_reports)?cloud.anrem_daily_reports:[];var rseen={};cloudRep.forEach(function(r){rseen[String(r.id)]=1});localRep.forEach(function(r){if(!rseen[String(r.id)]){cloudRep.push(r);rseen[String(r.id)]=1}});
+ var localRep=reports(),cloudRep=Array.isArray(cloud.anrem_daily_reports)?cloud.anrem_daily_reports:[];
+ var rseen={};cloudRep.forEach(function(r){rseen[String(r.id)]=1});localRep.forEach(function(r){if(!rseen[String(r.id)]){cloudRep.push(r);rseen[String(r.id)]=1}});
+ var localLeave=leaveRequests(),cloudLeave=Array.isArray(cloud.anrem_leave_requests)?cloud.anrem_leave_requests:[];
+ var lseen={};cloudLeave.forEach(function(r){lseen[String(r.id)]=1});localLeave.forEach(function(r){if(!lseen[String(r.id)]){cloudLeave.push(r);lseen[String(r.id)]=1}});
  if(pendingItems().indexOf('attendance')>=0){var ar=await fetch(API+'/api/attendance/sync',{method:'POST',headers:headers(),body:JSON.stringify({value:cloudAtt})});if(!ar.ok)throw new Error('attendance');var ax=await ar.json();if(ax.state)applyState(ax.state);else applyState({rcs_att:cloudAtt});clearPending('attendance')}
  if(pendingItems().indexOf('reports')>=0){var rr=await fetch(API+'/api/snapshot/anrem_daily_reports',{method:'POST',headers:headers(),body:JSON.stringify({value:cloudRep})});if(!rr.ok)throw new Error('reports');var rx=await rr.json();if(rx.state)applyState(rx.state);else applyState({anrem_daily_reports:cloudRep});clearPending('reports')}
+ if(pendingItems().indexOf('leave')>=0){var lr=await fetch(API+'/api/snapshot/anrem_leave_requests',{method:'POST',headers:headers(),body:JSON.stringify({value:cloudLeave})});if(!lr.ok)throw new Error('leave requests');var lx=await lr.json();if(lx.state)applyState(lx.state);else applyState({anrem_leave_requests:cloudLeave});clearPending('leave')}
  toast('Offline records synchronised');
  }catch(e){updateSyncBadge()}}
 window.addEventListener('online',function(){updateSyncBadge();syncPending();syncEmergencyQueue()});window.addEventListener('offline',updateSyncBadge);
