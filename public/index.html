@@ -389,17 +389,14 @@ async function submitDailyActivity(){
 function compiledWeeklyReport(uid,week){return activityReports().filter(function(r){return String(r.uid)===String(uid)&&r.week===week}).sort(function(a,b){return (a.date+' '+a.time).localeCompare(b.date+' '+b.time)})}
 function compiledMonthlyWeeks(uid,month){var weeks={};activityReports().filter(function(r){return String(r.uid)===String(uid)&&r.month===month}).forEach(function(r){(weeks[r.week]||(weeks[r.week]=[])).push(r)});return weeks}
 function activityReportCard(r){
+ var summary=r.general||r.activities||'';
  return '<div class="card activity-report-card" style="margin-top:10px" data-activity-id="'+esc(r.id)+'">'+
- '<p><b>'+esc(r.date)+' '+esc(r.time)+'</b> | Supervisor: '+esc(r.supervisor||'')+' | Mode: '+esc(r.mode||'')+'</p>'+
+ '<p><b>'+esc(r.date)+' '+esc(r.time)+'</b> | Supervisor: '+esc(r.supervisor||'')+' | Mode: '+esc(r.supervision||r.mode||'')+'</p>'+
  '<p><b>Challenges:</b><br>'+esc(r.challenges||'').replace(/\n/g,'<br>')+'</p>'+
- '<p><b>Achievements:</b><br>'+esc(r.achievements||'').replace(/\n/g,'<br>')+'</p>'+
- '<p><b>Incidents & Activities:</b><br>'+esc(r.activities||'').replace(/\n/g,'<br>')+'</p>'+
- '<p><b>Unfinished task:</b> '+esc(r.unfinished||'')+(r.unfinished==='Yes'?'<br>'+esc(r.unfinishedDetails||'').replace(/\n/g,'<br>'):'')+'</p>'+
- '<div class="row">'+
- '<button type="button" data-activity-action="edit" data-id="'+esc(r.id)+'">Edit</button>'+
- '<button type="button" class="red" data-activity-action="delete" data-id="'+esc(r.id)+'">Delete</button>'+
- '<button type="button" class="light" data-activity-action="pdf" data-id="'+esc(r.id)+'">Download PDF</button>'+
- '</div></div>';
+ '<p><b>Weekly Summary / Incidents & Activities:</b><br>'+esc(summary).replace(/\n/g,'<br>')+'</p>'+
+ (r.achievements?'<p><b>Achievements:</b><br>'+esc(r.achievements).replace(/\n/g,'<br>')+'</p>':'')+
+ '<p><b>Unfinished task:</b> '+esc(r.unfinished||'No')+(r.unfinished==='Yes'?'<br>'+esc(r.unfinishedDetails||'').replace(/\n/g,'<br>'):'')+'</p>'+
+ '<div class="row"><button type="button" data-activity-action="edit" data-id="'+esc(r.id)+'">Edit</button><button type="button" class="red" data-activity-action="delete" data-id="'+esc(r.id)+'">Delete</button><button type="button" class="light" data-activity-action="pdf" data-id="'+esc(r.id)+'">Download PDF</button></div></div>';
 }
 function activityPrintable(title,rows){
  var html='<!doctype html><html><head><meta charset="utf-8"><title>'+esc(title)+'</title>'+
@@ -443,11 +440,12 @@ async function deleteActivityGroup(uid,key,type){
  toast((type==='week'?'Weekly':'Monthly')+' activity report deleted.');
 }
 function activityStaffFolder(p){
- var rows=activityReports().filter(function(r){return String(r.uid)===String(p.uid)}).sort(function(a,b){return (b.date+" "+b.time).localeCompare(a.date+" "+a.time)}),weeks={},months={};rows.forEach(function(r){(weeks[r.week]||(weeks[r.week]=[])).push(r);(months[r.month]||(months[r.month]=[])).push(r)});
- var h='<details class="card"><summary style="cursor:pointer;font-weight:700">'+esc(p.name)+' — '+esc(p.uid)+'</summary><p><b>Job Role:</b> '+esc(p.classDept||'')+' &nbsp; <b>Supervisor:</b> '+esc(p.supervisor||'')+'</p><h4>Daily Reports ('+rows.length+')</h4>';
- if(rows.length)rows.forEach(function(r){h+=activityReportCard(r)});else h+='<p>No daily activity reports submitted.</p>';
+ var rows=activityReports().filter(function(r){return String(r.uid)===String(p.uid)}).sort(function(a,b){return (b.date+" "+b.time).localeCompare(a.date+" "+a.time)}),weeks={},months={};
+ rows.forEach(function(r){var w=r.week||r.weekStart||r.date||'',mo=r.month||(w?w.slice(0,7):'');if(w)(weeks[w]||(weeks[w]=[])).push(r);if(mo)(months[mo]||(months[mo]=[])).push(r)});
+ var h='<details class="card"><summary style="cursor:pointer;font-weight:700">'+esc(p.name)+' — '+esc(p.uid)+' <span style="float:right">'+rows.length+' report(s)</span></summary><p><b>Job Role:</b> '+esc(p.classDept||'')+' &nbsp; <b>Supervisor:</b> '+esc(p.supervisor||'')+'</p>';
+ if(rows.length)rows.forEach(function(r){h+=activityReportCard(r)});else h+='<p>No weekly activity reports submitted.</p>';
  h+='<h4>Weekly Reports</h4>';
- Object.keys(weeks).sort().reverse().forEach(function(w){var rr=weeks[w];h+='<details style="margin:8px 0"><summary>Week starting '+esc(w)+' — '+rr.length+' daily report(s)</summary><div class="row" style="margin:8px 0"><button type="button" data-edit-group="week" data-uid="'+esc(p.uid)+'" data-key="'+esc(w)+'">Edit Week</button><button type="button" class="red" data-delete-group="week" data-uid="'+esc(p.uid)+'" data-key="'+esc(w)+'">Delete Week</button><button type="button" class="light" data-pdf-group="week" data-uid="'+esc(p.uid)+'" data-key="'+esc(w)+'">Download Week PDF</button></div>'+rr.map(activityReportCard).join('')+'</details>'});if(!Object.keys(weeks).length)h+='<p>No weekly reports yet.</p>';
+ Object.keys(weeks).sort().reverse().forEach(function(w){var rr=weeks[w];h+='<details style="margin:8px 0"><summary>Week starting '+esc(w)+' — '+rr.length+' report(s)</summary><div class="row" style="margin:8px 0"><button type="button" data-edit-group="week" data-uid="'+esc(p.uid)+'" data-key="'+esc(w)+'">Edit Week</button><button type="button" class="red" data-delete-group="week" data-uid="'+esc(p.uid)+'" data-key="'+esc(w)+'">Delete Week</button><button type="button" class="light" data-pdf-group="week" data-uid="'+esc(p.uid)+'" data-key="'+esc(w)+'">Download Week PDF</button></div>'+rr.map(activityReportCard).join('')+'</details>'});if(!Object.keys(weeks).length)h+='<p>No weekly reports yet.</p>';
  h+='<h4>Monthly Reports</h4>';
  Object.keys(months).sort().reverse().forEach(function(mo){var mw=compiledMonthlyWeeks(p.uid,mo);h+='<details style="margin:8px 0"><summary>'+esc(mo)+' Monthly Report</summary><div class="row" style="margin:8px 0"><button type="button" data-edit-group="month" data-uid="'+esc(p.uid)+'" data-key="'+esc(mo)+'">Edit Month</button><button type="button" class="red" data-delete-group="month" data-uid="'+esc(p.uid)+'" data-key="'+esc(mo)+'">Delete Month</button><button type="button" class="light" data-pdf-group="month" data-uid="'+esc(p.uid)+'" data-key="'+esc(mo)+'">Download Month PDF</button></div>';Object.keys(mw).sort().forEach(function(w){h+='<div class="card"><b>Week starting '+esc(w)+'</b>'+mw[w].map(activityReportCard).join('')+'</div>'});h+='</details>'});if(!Object.keys(months).length)h+='<p>No monthly reports yet.</p>';
  return h+'</details>';
