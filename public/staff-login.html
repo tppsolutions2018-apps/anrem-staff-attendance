@@ -100,17 +100,22 @@ function emergencyReports(){return stateGet('anrem_emergency_reports',[])}
 function emergencyQueue(){return stateGet('anrem_emergency_queue',[])}
 function leaveRequests(){return stateGet('anrem_leave_requests',[])}
 async function syncEmergencyQueue(){
- if(!navigator.onLine||!token())return;
- var q=emergencyQueue();if(!q.length)return;
+ if(!navigator.onLine||!token())return false;
+ var q=emergencyQueue();if(!q.length)return true;
  try{
   var st=await fetch(API+'/api/state',{headers:headers()});if(!st.ok)throw new Error('state');
   var cloud=await st.json(),current=Array.isArray(cloud.anrem_emergency_reports)?cloud.anrem_emergency_reports:[];
-  var seen={};current.forEach(function(x){seen[String(x.id)]=1});
-  q.forEach(function(x){if(!seen[String(x.id)])current.push(x)});
+  var byId={};current.forEach(function(x){byId[String(x.id)]=x});
+  q.forEach(function(x){
+   var existing=byId[String(x.id)];
+   if(!existing){x.status='Submitted';x.syncedAt=new Date().toISOString();current.push(x);byId[String(x.id)]=x;}
+   else{existing.status='Submitted';existing.syncedAt=existing.syncedAt||new Date().toISOString();}
+  });
   var res=await fetch(API+'/api/snapshot/anrem_emergency_reports',{method:'POST',headers:headers(),body:JSON.stringify({value:current})});
   var out=await res.json();if(!res.ok)throw new Error(out.error||'Emergency sync failed');
-  applyState(out.state);applyState({anrem_emergency_queue:[]});
- }catch(e){updateSyncBadge()}
+  applyState(out.state||{anrem_emergency_reports:current});applyState({anrem_emergency_queue:[]});
+  return true;
+ }catch(e){updateSyncBadge();return false}
 }
 
 function makeTabs(){
@@ -256,7 +261,7 @@ function emergencyPage(){
  }catch(e){toast(e.message||'Microphone unavailable. Check permission or attach an audio file.')}};
  $('erStop').onclick=function(){if(recorder&&recorder.state!=='inactive')recorder.stop()};
  $('erCancel').onclick=function(){if(recorder&&recorder.state!=='inactive'){recorder.onstop=function(){if(stream)stream.getTracks().forEach(function(t){t.stop()});stream=null};recorder.stop()}recorded=null;$('erAudio').removeAttribute('src');$('erAudio').load();stopTimer();$('erRecStatus').textContent='Recording cancelled';$('erRecord').disabled=false;$('erStop').disabled=true;$('erCancel').disabled=true};
- $('erSubmit').onclick=async function(){var title=$('erTitle').value.trim(),details=$('erDetails').value.trim();if(!title||!details)return toast('Enter an incident title and details.');try{if(recorder&&recorder.state!=='inactive')return toast('Finish or cancel the voice recording first.');var files=[];for(var f of Array.from($('erFiles').files||[])){var x=await fileData(f,3*1024*1024);if(x)files.push(x)}if(recorded){var audioFile=new File([recorded],'voice-recording.webm',{type:recorded.type||'audio/webm'});var voiceData=await fileData(audioFile,3*1024*1024);if(voiceData)files.push(voiceData)}var row={id:'ANREM-ER-'+Date.now(),uid:p.uid,name:p.name,title:title,details:details,attachments:files,createdAt:new Date().toISOString(),date:today(),time:now(),status:'Queued'};var all=emergencyReports();all.push(row);applyState({anrem_emergency_reports:all});var q=emergencyQueue();q.push(row);applyState({anrem_emergency_queue:q});await syncEmergencyQueue();toast(navigator.onLine?'Emergency report saved / synced.':'Saved locally; will sync when online.');emergencyPage()}catch(e){toast(e.message||'Emergency report not submitted')}};
+ $('erSubmit').onclick=async function(){var title=$('erTitle').value.trim(),details=$('erDetails').value.trim();if(!title||!details)return toast('Enter an incident title and details.');try{if(recorder&&recorder.state!=='inactive')return toast('Finish or cancel the voice recording first.');var files=[];for(var f of Array.from($('erFiles').files||[])){var x=await fileData(f,3*1024*1024);if(x)files.push(x)}if(recorded){var audioFile=new File([recorded],'voice-recording.webm',{type:recorded.type||'audio/webm'});var voiceData=await fileData(audioFile,3*1024*1024);if(voiceData)files.push(voiceData)}var row={id:'ANREM-ER-'+Date.now(),uid:p.uid,name:p.name,title:title,details:details,attachments:files,createdAt:new Date().toISOString(),date:today(),time:now(),status:'Queued'};var all=emergencyReports();all.push(row);applyState({anrem_emergency_reports:all});var q=emergencyQueue();q.push(row);applyState({anrem_emergency_queue:q});var synced=await syncEmergencyQueue();toast(synced?'Emergency report submitted to Admin.':'Emergency report saved on this device and queued for sync.');emergencyPage()}catch(e){toast(e.message||'Emergency report not submitted')}};
  $('main').querySelectorAll('[data-er-edit]').forEach(function(b){b.onclick=async function(){var row=emergencyReports().find(function(x){return String(x.id)===b.getAttribute('data-er-edit')});if(!row)return;var title=prompt('Edit title:',row.title||'');if(title===null)return;var details=prompt('Edit details:',row.details||'');if(details===null)return;await emergencyChange(row.id,'PATCH',{title:title,details:details})}});
  $('main').querySelectorAll('[data-er-delete]').forEach(function(b){b.onclick=function(){if(confirm('Delete this emergency report?'))emergencyChange(b.getAttribute('data-er-delete'),'DELETE')}});
 }
