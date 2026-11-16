@@ -13,6 +13,7 @@ input,select,textarea{width:100%;padding:13px;border:1px solid var(--line);borde
 textarea{min-height:120px}label{font-size:13px;color:#475467;font-weight:800}.hide{display:none!important}
 .center{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:18px}
 .card{background:#fff;border:1px solid var(--line);border-radius:22px;padding:18px;box-shadow:0 8px 25px #00000010}
+.accordion{margin-top:12px;padding:0;overflow:hidden}.accordion summary{list-style:none;cursor:pointer;padding:17px 18px;font-weight:900;color:var(--navy);display:flex;align-items:center;justify-content:space-between;gap:12px}.accordion summary::-webkit-details-marker{display:none}.accordion summary:after{content:'+';font-size:22px;line-height:1;color:var(--navy)}.accordion[open] summary:after{content:'−'}.accordion .accordion-body{padding:0 18px 18px}.accordion summary:focus-visible{outline:3px solid #f58220;outline-offset:-3px;border-radius:18px}
 .login{max-width:450px;width:100%}.logo{width:125px;height:125px;object-fit:contain}
 h1,h2,h3{color:var(--navy)}.brand{text-align:center;font-weight:900;color:var(--navy);font-size:21px}.sub{text-align:center;font-weight:900;color:var(--red);margin-bottom:16px}
 .top{position:sticky;top:0;z-index:5;background:#fff;border-bottom:1px solid var(--line);padding:10px;display:flex;align-items:center;gap:10px}
@@ -94,10 +95,39 @@ function staffRecord(){
  });
 }
 
+
+function emergencyReports(){return stateGet('anrem_emergency_reports',[])}
+function emergencyQueue(){return stateGet('anrem_emergency_queue',[])}
+function leaveRequests(){return stateGet('anrem_leave_requests',[])}
+async function syncEmergencyQueue(){
+ if(!navigator.onLine||!token())return false;
+ var q=emergencyQueue();if(!q.length)return true;
+ try{
+  var uid=String(currentUser&&currentUser.uid||'');if(!uid)throw new Error('Staff identity is missing. Please sign in again.');
+  var st=await fetch(API+'/api/state',{headers:headers()});if(!st.ok)throw new Error('Unable to load cloud records');
+  var cloud=await st.json(),current=Array.isArray(cloud.anrem_emergency_reports)?cloud.anrem_emergency_reports:[];
+  var byId={};current.forEach(function(x){byId[String(x.id)]=x});
+  var expected=[];
+  q.forEach(function(raw){
+   var x=Object.assign({},raw,{uid:uid,name:String(currentUser.name||raw.name||''),status:'Submitted',syncedAt:new Date().toISOString()});
+   expected.push(String(x.id));
+   if(!byId[String(x.id)]){current.push(x);byId[String(x.id)]=x;}
+  });
+  var res=await fetch(API+'/api/snapshot/anrem_emergency_reports',{method:'POST',headers:headers(),body:JSON.stringify({value:current})});
+  var out=await res.json();if(!res.ok)throw new Error(out.error||'Emergency sync failed');
+  var saved=Array.isArray(out.state&&out.state.anrem_emergency_reports)?out.state.anrem_emergency_reports:[];
+  var savedIds=new Set(saved.map(function(x){return String(x.id)}));
+  if(expected.some(function(id){return !savedIds.has(id)}))throw new Error('The server did not confirm every emergency report. Your offline copy has been kept for retry.');
+  applyState(out.state);applyState({anrem_emergency_queue:[]});updateSyncBadge();return true;
+ }catch(e){updateSyncBadge();toast(e.message||'Emergency sync failed. Your offline copy is retained.');return false}
+}
+
 function makeTabs(){
  $('tabs').innerHTML=
   '<button data-page="clock">Staff Clock In/Out</button>'+
-  '<button data-page="daily">Daily Activities Report</button>';
+  '<button data-page="weekly">Weekly Activity Report</button>'+
+  '<button data-page="emergency">Emergency Report</button>'+
+  '<button data-page="leave">Leave Request</button>';
  Array.prototype.forEach.call($('tabs').querySelectorAll('button'),function(b){
   b.onclick=function(){nav(this.getAttribute('data-page'))}
  });
@@ -108,53 +138,164 @@ function nav(page){
   b.classList.toggle('active',b.getAttribute('data-page')===page)
  });
  if(page==='clock')clockPage();
- if(page==='daily')dailyPage();
+ if(page==='weekly')weeklyPage();
+ if(page==='emergency')emergencyPage();
+ if(page==='leave')leavePage();
 }
 
 function clockPage(){
  var p=staffRecord();
  if(!p){$('main').innerHTML='<div class="card"><h2>Staff record not found</h2><p>Please contact Admin.</p></div>';return}
- var rows=attendance().filter(function(r){
-  return String(r.uid)===String(p.uid)&&(r.session==='Clock In'||r.session==='Clock Out')
+ var rows=attendance().filter(function(r){return String(r.uid)===String(p.uid)&&(r.session==='Clock In'||r.session==='Clock Out')}).sort(function(a,b){return (String(a.date||'')+' '+String(a.time||'')).localeCompare(String(b.date||'')+' '+String(b.time||''))});
+ var byDay={},weekly={},monthly={},total=0;
+ rows.forEach(function(r){(byDay[r.date]||(byDay[r.date]=[])).push(r)});
+ Object.keys(byDay).forEach(function(day){
+  var events=byDay[day],mins=0,open=null;
+  events.forEach(function(ev){
+   if(ev.session==='Clock In'){open=ev}
+   else if(ev.session==='Clock Out'&&open){
+    var a=new Date(day+'T'+to24(open.time)+':00'),b=new Date(day+'T'+to24(ev.time)+':00');
+    var d=Math.max(0,Math.round((b-a)/60000));mins+=d;open=null;
+   }
+  });
+  total+=mins;
+  var dt=new Date(day+'T00:00:00'),dow=(dt.getDay()+6)%7;dt.setDate(dt.getDate()-dow);
+  var wk=dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');
+  var mo=day.slice(0,7);weekly[wk]=(weekly[wk]||0)+mins;monthly[mo]=(monthly[mo]||0)+mins;
+  byDay[day]={events:events,minutes:mins,open:open};
  });
- var todayRows=rows.filter(function(r){return r.date===today()});
- var last=todayRows.length?todayRows[todayRows.length-1]:null;
-
+ function to24(t){var s=String(t||'').trim(),m=s.match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)?$/i);if(!m)return '00:00';var h=Number(m[1]),ap=(m[3]||'').toUpperCase();if(ap==='PM'&&h<12)h+=12;if(ap==='AM'&&h===12)h=0;return String(h).padStart(2,'0')+':'+m[2]}
+ function fmt(n){return Math.floor(n/60)+'h '+(n%60)+'m'}
+ function table(title,obj,fmtMonth){
+  var keys=Object.keys(obj).sort().reverse(),s='<div class="tablewrap"><table><tr><th>'+title+'</th><th>Total Hours & Minutes</th></tr>';
+  keys.forEach(function(k){var label=k;if(fmtMonth){var d=new Date(k+'-01T00:00:00');label=d.toLocaleDateString(undefined,{month:'long',year:'numeric'})}s+='<tr><td>'+esc(label)+'</td><td><b>'+fmt(obj[k])+'</b></td></tr>'});
+  if(!keys.length)s+='<tr><td colspan="2">No completed clock-in/out pairs yet.</td></tr>';
+  return s+'</table></div>';
+ }
+ var recent='<div class="tablewrap"><table><tr><th>Date</th><th>Time</th><th>Action</th></tr>';
+ rows.slice().reverse().slice(0,30).forEach(function(r){
+  recent+='<tr><td>'+esc(r.date)+'</td><td>'+esc(r.time)+'</td><td>'+esc(r.session)+'</td></tr>';
+ });
+ if(!rows.length)recent+='<tr><td colspan="3">No attendance records yet.</td></tr>';
+ recent+='</table></div>';
+ var todayRows=rows.filter(function(r){return r.date===today()}),lastToday=todayRows.length?todayRows[todayRows.length-1]:null;
+ var clockedIn=!!lastToday&&lastToday.session==='Clock In';
  $('main').innerHTML=
- '<div class="card"><h2>Staff Clock In/Out</h2>'+
- '<h3>'+esc(p.name)+'</h3>'+
- '<p><b>Staff ID:</b> '+esc(p.uid)+'</p>'+
- '<h1>'+now()+'</h1>'+
- '<div class="row"><button class="green" id="cin">Clock In</button><button class="red" id="cout">Clock Out</button></div>'+
- '<p class="muted">You can clock in and out as required.</p></div><br>'+
- '<div class="card"><h3>My Recent Clock Records</h3>'+
- '<div>'+rows.slice(-20).reverse().map(function(r){
-  return '<p><b>'+esc(r.date)+'</b> — '+esc(r.time)+' — '+esc(r.session)+'</p>'
- }).join('')+'</div></div>';
-
+  '<div class="card"><h2>Staff Clock In/Out</h2><p class="muted">Welcome, '+esc(p.name)+'. Record your attendance using the buttons below.</p>'+
+  '<div class="grid"><div><label>Current Date</label><h3>'+esc(today())+'</h3></div><div><label>Current Time</label><h3>'+esc(now())+'</h3></div></div>'+
+  '<div class="row"><button type="button" class="green" id="cin" '+(clockedIn?'disabled':'')+'>Clock In</button>'+
+  '<button type="button" class="red" id="cout" '+(!clockedIn?'disabled':'')+'>Clock Out</button></div>'+
+  '<p class="muted">'+(clockedIn?'You are currently clocked in. Please clock out when your shift ends.':(lastToday&&lastToday.session==='Clock Out'?'Your clock-out has been recorded for today.':'You have not clocked in today.'))+'</p></div>'+
+  '<details class="card accordion"><summary>My Recent Attendance</summary><div class="accordion-body">'+recent+'</div></details>'+
+  '<details class="card accordion"><summary>My Hours Report</summary><div class="accordion-body"><h2>'+fmt(total)+'</h2><p class="muted">Total completed hours recorded</p></div></details>'+
+  '<details class="card accordion"><summary>Weekly Totals</summary><div class="accordion-body">'+table('Week Starting',weekly,false)+'</div></details>'+
+  '<details class="card accordion"><summary>Monthly Totals</summary><div class="accordion-body">'+table('Month',monthly,true)+'</div></details>';
+ $('main').querySelectorAll('[data-att-edit]').forEach(function(b){b.onclick=async function(){
+  var id=b.getAttribute('data-att-edit'),row=attendance().find(function(x){return String(x._eventId||x.id)===String(id)});if(!row)return toast('Attendance record not found.');
+  var date=prompt('Correct date (YYYY-MM-DD):',row.date||today());if(date===null)return;
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date))return toast('Use YYYY-MM-DD date format.');
+  var time=prompt('Correct time:',row.time||now());if(time===null||!time.trim())return;
+  try{var res=await fetch(API+'/api/attendance/'+encodeURIComponent(id),{method:'PUT',headers:headers(),body:JSON.stringify({date:date,time:time.trim()})});var x=await res.json();if(!res.ok)throw new Error(x.error||'Update failed');applyState(x.state);toast('Attendance updated.');clockPage()}catch(e){toast(e.message||'Could not update attendance')}
+ }});
+ $('main').querySelectorAll('[data-att-delete]').forEach(function(b){b.onclick=async function(){
+  var id=b.getAttribute('data-att-delete');if(!confirm('Delete this attendance record? This will also update Admin records.'))return;
+  try{var res=await fetch(API+'/api/attendance/'+encodeURIComponent(id),{method:'DELETE',headers:headers()});var x=await res.json();if(!res.ok)throw new Error(x.error||'Delete failed');applyState(x.state);toast('Attendance record deleted.');clockPage()}catch(e){toast(e.message||'Could not delete attendance')}
+ }});
  $('cin').onclick=function(){
-  var a=attendance();
-  a.push({id:'ANREM-ATT-'+Date.now()+'-'+Math.random().toString(36).slice(2,8),date:today(),time:now(),uid:p.uid,name:p.name,role:'Staff',
-   classDept:p.classDept||'',session:'Clock In',status:'Present',scanner:'Self',offlineCreated:!navigator.onLine});
+  var a=attendance(),todayRows=a.filter(function(r){return String(r.uid)===String(p.uid)&&r.date===today()}).sort(function(x,y){return String(x.time||'').localeCompare(String(y.time||''))}),last=todayRows.length?todayRows[todayRows.length-1]:null;
+  if(last&&last.session==='Clock In')return toast('You have already clocked in. Clock out first.');
+  a.push({id:'ANREM-ATT-'+Date.now()+'-'+Math.random().toString(36).slice(2,8),date:today(),time:now(),uid:p.uid,name:p.name,role:'Staff',classDept:p.classDept||'',session:'Clock In',status:'Present',scanner:'Self',offlineCreated:!navigator.onLine});
   saveAttendance(a,'Clock In');
  };
  $('cout').onclick=function(){
-  var a=attendance(),day=a.filter(function(r){return String(r.uid)===String(p.uid)&&r.date===today()}),last=day.length?day[day.length-1]:null;
+  var a=attendance(),day=a.filter(function(r){return String(r.uid)===String(p.uid)&&r.date===today()}).sort(function(x,y){return String(x.time||'').localeCompare(String(y.time||''))}),last=day.length?day[day.length-1]:null;
   if(!last||last.session!=='Clock In')return toast('Clock In first before Clock Out.');
-  a.push({id:'ANREM-ATT-'+Date.now()+'-'+Math.random().toString(36).slice(2,8),date:today(),time:now(),uid:p.uid,name:p.name,role:'Staff',
-   classDept:p.classDept||'',session:'Clock Out',status:'Present',scanner:'Self',offlineCreated:!navigator.onLine});
+  a.push({id:'ANREM-ATT-'+Date.now()+'-'+Math.random().toString(36).slice(2,8),date:today(),time:now(),uid:p.uid,name:p.name,role:'Staff',classDept:p.classDept||'',session:'Clock Out',status:'Present',scanner:'Self',offlineCreated:!navigator.onLine});
   saveAttendance(a,'Clock Out');
  };
 }
-
 async function saveAttendance(a,msg){
  applyState({rcs_att:a});
  if(!navigator.onLine){markPending('attendance');toast(msg+' saved on this device. Waiting for internet.');clockPage();return}
  try{
   var r=await fetch(API+'/api/attendance/sync',{method:'POST',headers:headers(),body:JSON.stringify({value:a})});
   var x=await r.json();if(!r.ok)throw new Error(x.error||'Cloud save failed');
+  var saved=Array.isArray(x.state&&x.state.rcs_att)?x.state.rcs_att:[];
+  var keys={};saved.forEach(function(v){keys[String(v.id||v._eventId||[v.uid,v.date,v.time,v.session].join('|'))]=1});
+  var missing=a.filter(function(v){return String(v.uid||'')===String(currentUser.uid||'')&&!keys[String(v.id||v._eventId||[v.uid,v.date,v.time,v.session].join('|'))]});
+  if(missing.length)throw new Error('The server did not confirm the attendance record. It has been kept for retry.');
   applyState(x.state||{rcs_att:a});clearPending('attendance');toast(msg+' synced to Admin');clockPage();
  }catch(e){markPending('attendance');toast(msg+' saved on this device. Sync will retry when online.');clockPage()}
+}
+
+
+function mondayOf(d){var x=new Date(d+'T12:00:00'),day=x.getDay()||7;x.setDate(x.getDate()-day+1);return x.toISOString().slice(0,10)}
+function weeklyPage(){
+ var p=staffRecord();if(!p){$('main').innerHTML='<div class="card">Staff record not found.</div>';return}
+ var arr=reports().filter(function(x){return String(x.uid)===String(p.uid)}).sort(function(a,b){return String(b.date||'').localeCompare(String(a.date||''))});
+ var h='<div class="card"><h2>Weekly Activity Report</h2><p class="muted">Submit one summary of your work for the week.</p><label>Name</label><input readonly value="'+esc(p.name)+'"><br><br><label>Week Starting (Monday)</label><input id="wDate" type="date" value="'+mondayOf(today())+'"><br><br><label>Time</label><input id="wTime" type="time" value="'+new Date().toTimeString().slice(0,5)+'"><br><br><label>Job Role</label><input readonly value="'+esc(p.classDept||'')+'"><br><br><label>Supervisor Name</label><input id="wSup" value="'+esc(p.supervisor||'')+'"><br><br><label>What major challenges affected your performance during this week?</label><textarea id="wChallenges"></textarea><br><br><label>Weekly summary of incidents and activities completed according to your job role:</label><textarea id="wGeneral"></textarea><br><br><label>Do you have unfinished tasks that need to be completed next week?</label><select id="wUnfinished"><option>No</option><option>Yes</option></select><br><br><label>Mode of Supervision</label><select id="wMode"><option>Onsite</option><option>Remote</option></select><br><br><label>If yes, give details of tasks to carry forward</label><textarea id="wDetails"></textarea><br><br><button id="weeklySubmit" class="green">Submit Weekly Report</button></div><br><div class="card"><h3>My Submitted Weekly Reports</h3>';
+ if(arr.length){h+='<div class="tablewrap"><table><tr><th>Week Starting</th><th>Time</th><th>Supervision</th><th>Summary</th></tr>'+arr.map(function(x){return '<tr><td>'+esc(x.date)+'</td><td>'+esc(x.time)+'</td><td>'+esc(x.supervision||'')+'</td><td>'+esc(x.general||'').slice(0,140)+'</td></tr>'}).join('')+'</table></div>'}else h+='<p>No weekly reports submitted yet.</p>';
+ h+='</div>';$('main').innerHTML=h;
+ $('weeklySubmit').onclick=async function(){
+  var date=$('wDate').value,challenge=$('wChallenges').value.trim(),general=$('wGeneral').value.trim(),unfinished=$('wUnfinished').value,details=$('wDetails').value.trim();
+  if(!date||!challenge||!general)return toast('Complete the week starting date, challenges and weekly summary.');
+  if(unfinished==='Yes'&&!details)return toast('Give details of unfinished tasks.');
+  var start=mondayOf(date),end=new Date(start+'T12:00:00');end.setDate(end.getDate()+6);
+  var row={id:'ANREM-WR-'+Date.now()+'-'+Math.random().toString(36).slice(2,7),uid:p.uid,name:p.name,date:start,week:start,weekEnd:end.toISOString().slice(0,10),period:'weekly',time:$('wTime').value,jobRole:p.classDept||'',supervisor:$('wSup').value.trim(),challenges:challenge,general:general,unfinished:unfinished,unfinishedDetails:details,supervision:$('wMode').value,month:start.slice(0,7)};
+  var a=reports();a.push(row);applyState({anrem_daily_reports:a});
+  if(!navigator.onLine){markPending('reports');toast('Weekly report saved locally and queued for sync.');weeklyPage();return}
+  try{var res=await fetch(API+'/api/snapshot/anrem_daily_reports',{method:'POST',headers:headers(),body:JSON.stringify({value:a})});var out=await res.json();if(!res.ok)throw new Error(out.error||'Unable to submit report');applyState(out.state);clearPending('reports');toast('Weekly report submitted to Admin.');weeklyPage()}
+  catch(e){markPending('reports');toast('Weekly report saved locally and queued for sync.');weeklyPage()}
+ };
+}
+function fileData(file,maxBytes){
+ return new Promise(function(resolve,reject){if(!file)return resolve(null);if(file.size>maxBytes)return reject(new Error('Attachment is too large'));var r=new FileReader();r.onload=function(){resolve({name:file.name,type:file.type,data:String(r.result)})};r.onerror=reject;r.readAsDataURL(file)});
+}
+function emergencyPage(){
+ var p=staffRecord();if(!p){$('main').innerHTML='<div class="card">Staff record not found.</div>';return}
+ var arr=emergencyReports().filter(function(x){return String(x.uid)===String(p.uid)}).sort(function(a,b){return String(b.createdAt||'').localeCompare(String(a.createdAt||''))});
+ var h='<div class="card"><h2>Emergency Report</h2><p>Urgent incidents are sent to Admin. Name, Staff ID, date and time are added automatically.</p><label>Incident title</label><input id="erTitle"><br><br><label>Emergency details</label><textarea id="erDetails"></textarea><br><br><label>Voice recording (optional)</label><div class="row"><button id="erRecord" type="button">Start recording</button><button id="erStop" type="button" disabled>Finish recording</button><button id="erCancel" type="button" class="light" disabled>Cancel recording</button></div><p id="erRecStatus">Not recording</p><audio id="erAudio" controls></audio><br><br><label>Attach photo, video or document</label><input id="erFiles" type="file" accept="image/*,video/*,audio/*,.pdf,.doc,.docx" multiple><br><br><button id="erSubmit" class="red">Submit Emergency Report</button></div><br><div class="card"><h3>My Emergency Reports</h3>';
+ if(arr.length){h+='<div class="tablewrap"><table><tr><th>Date</th><th>Title</th><th>Status</th><th>Action</th></tr>'+arr.map(function(x){return '<tr><td>'+esc(x.createdAt||'')+'</td><td>'+esc(x.title||'')+'</td><td>'+esc(x.status||'Submitted/Pending Sync')+'</td><td><button data-er-edit="'+esc(x.id)+'">Edit</button> <button class="red" data-er-delete="'+esc(x.id)+'">Delete</button></td></tr>'}).join('')+'</table></div>'}else h+='<p>No emergency reports yet.</p>';
+ h+='</div>';$('main').innerHTML=h;
+ var recorded=null,recorder=null,chunks=[],stream=null,timer=null,started=0;
+ function stopTimer(){if(timer){clearInterval(timer);timer=null}}
+ function elapsed(){var sec=Math.floor((Date.now()-started)/1000);$('erRecStatus').textContent='● RECORDING '+String(Math.floor(sec/60)).padStart(2,'0')+':'+String(sec%60).padStart(2,'0')}
+ $('erRecord').onclick=async function(){try{
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia||typeof MediaRecorder==='undefined')throw new Error('Recording is not supported by this browser');
+  stream=await navigator.mediaDevices.getUserMedia({audio:true});recorder=new MediaRecorder(stream);chunks=[];
+  recorder.ondataavailable=function(e){if(e.data&&e.data.size)chunks.push(e.data)};
+  recorder.onstop=function(){recorded=new Blob(chunks,{type:recorder.mimeType||'audio/webm'});$('erAudio').src=URL.createObjectURL(recorded);if(stream)stream.getTracks().forEach(function(t){t.stop()});stream=null;stopTimer();$('erRecStatus').textContent='Recording finished';$('erRecord').disabled=false;$('erStop').disabled=true;$('erCancel').disabled=true};
+  recorder.start();started=Date.now();elapsed();timer=setInterval(elapsed,500);$('erRecord').disabled=true;$('erStop').disabled=false;$('erCancel').disabled=false;
+ }catch(e){toast(e.message||'Microphone unavailable. Check permission or attach an audio file.')}};
+ $('erStop').onclick=function(){if(recorder&&recorder.state!=='inactive')recorder.stop()};
+ $('erCancel').onclick=function(){if(recorder&&recorder.state!=='inactive'){recorder.onstop=function(){if(stream)stream.getTracks().forEach(function(t){t.stop()});stream=null};recorder.stop()}recorded=null;$('erAudio').removeAttribute('src');$('erAudio').load();stopTimer();$('erRecStatus').textContent='Recording cancelled';$('erRecord').disabled=false;$('erStop').disabled=true;$('erCancel').disabled=true};
+ $('erSubmit').onclick=async function(){var title=$('erTitle').value.trim(),details=$('erDetails').value.trim();if(!title||!details)return toast('Enter an incident title and details.');try{if(recorder&&recorder.state!=='inactive')return toast('Finish or cancel the voice recording first.');var files=[];for(var f of Array.from($('erFiles').files||[])){var x=await fileData(f,3*1024*1024);if(x)files.push(x)}if(recorded){var audioFile=new File([recorded],'voice-recording.webm',{type:recorded.type||'audio/webm'});var voiceData=await fileData(audioFile,3*1024*1024);if(voiceData)files.push(voiceData)}var row={id:'ANREM-ER-'+Date.now(),uid:String(currentUser.uid||p.uid),name:currentUser.name||p.name,title:title,details:details,attachments:files,createdAt:new Date().toISOString(),date:today(),time:now(),status:'Queued'};var all=emergencyReports();all.push(row);applyState({anrem_emergency_reports:all});var q=emergencyQueue();q.push(row);applyState({anrem_emergency_queue:q});var synced=await syncEmergencyQueue();toast(synced?'Emergency report submitted to Admin.':'Emergency report saved on this device and queued for sync.');emergencyPage()}catch(e){toast(e.message||'Emergency report not submitted')}};
+ $('main').querySelectorAll('[data-er-edit]').forEach(function(b){b.onclick=async function(){var row=emergencyReports().find(function(x){return String(x.id)===b.getAttribute('data-er-edit')});if(!row)return;var title=prompt('Edit title:',row.title||'');if(title===null)return;var details=prompt('Edit details:',row.details||'');if(details===null)return;await emergencyChange(row.id,'PATCH',{title:title,details:details})}});
+ $('main').querySelectorAll('[data-er-delete]').forEach(function(b){b.onclick=function(){if(confirm('Delete this emergency report?'))emergencyChange(b.getAttribute('data-er-delete'),'DELETE')}});
+}
+async function emergencyChange(id,method,body){
+ try{var res=await fetch(API+'/api/emergency/'+encodeURIComponent(id),{method:method,headers:headers(),body:body?JSON.stringify(body):undefined});var x=await res.json();if(!res.ok)throw new Error(x.error||'Unable to update report');applyState(x.state);toast('Emergency report updated.');emergencyPage()}
+ catch(e){toast(e.message||'Unable to update emergency report')}
+}
+function leavePage(){
+ var p=staffRecord();if(!p){$('main').innerHTML='<div class="card">Staff record not found.</div>';return}
+ var arr=leaveRequests().filter(function(x){return String(x.uid)===String(p.uid)}).sort(function(a,b){return String(b.createdAt||'').localeCompare(String(a.createdAt||''))});
+ var h='<div class="card"><h2>Staff Leave Request</h2><label>Leave type</label><select id="lvType"><option value="">Select leave type</option><option>Annual Leave</option><option>Casual Leave</option><option>Sick Leave</option><option>Compassionate Leave</option><option>Maternity Leave</option><option>Paternity Leave</option><option>Study Leave</option><option>Other</option></select><br><br><div class="row"><div style="flex:1"><label>Start date</label><input id="lvStart" type="date"></div><div style="flex:1"><label>End date</label><input id="lvEnd" type="date"></div></div><br><label>Reason for leave</label><textarea id="lvReason"></textarea><br><br><label>Contact address / phone while on leave (optional)</label><input id="lvContact"><br><br><label>Supporting document (optional, max 2MB)</label><input id="lvFile" type="file" accept="image/*,.pdf,.doc,.docx"><br><br><button id="lvSubmit" class="red">Submit Leave Request</button></div><br><div class="card"><h3>My Leave Requests</h3>';
+ if(arr.length){h+='<div class="tablewrap"><table><tr><th>Submitted</th><th>Leave Type</th><th>Period</th><th>Status</th><th>Admin Comment / Action</th></tr>'+arr.map(function(x){return '<tr><td>'+esc(x.createdAt||'')+'</td><td>'+esc(x.leaveType||'')+'</td><td>'+esc(x.startDate||'')+' to '+esc(x.endDate||'')+'</td><td><b>'+esc(x.status||'Pending')+'</b></td><td>'+esc(x.adminComment||'')+(String(x.status||'Pending').toLowerCase()==='pending'?'<br><button data-lv-edit="'+esc(x.id)+'">Amend</button> <button data-lv-cancel="'+esc(x.id)+'" class="red">Cancel</button>':'')+'</td></tr>'}).join('')+'</table></div>'}else h+='<p>No leave requests submitted.</p>';
+ h+='</div>';$('main').innerHTML=h;
+ $('main').querySelectorAll('[data-lv-edit]').forEach(function(b){b.onclick=async function(){
+  var row=leaveRequests().find(function(x){return String(x.id)===b.getAttribute('data-lv-edit')});if(!row)return;
+  var type=prompt('Leave type:',row.leaveType||'');if(type===null)return;
+  var start=prompt('Start date (YYYY-MM-DD):',row.startDate||'');if(start===null)return;
+  var end=prompt('End date (YYYY-MM-DD):',row.endDate||'');if(end===null)return;
+  var reason=prompt('Reason:',row.reason||'');if(reason===null)return;
+  try{var res=await fetch(API+'/api/leave/'+encodeURIComponent(row.id),{method:'PATCH',headers:headers(),body:JSON.stringify({action:'amend',leaveType:type,startDate:start,endDate:end,reason:reason,contact:row.contact||''})});var x=await res.json();if(!res.ok)throw new Error(x.error||'Unable to amend request');applyState(x.state);toast('Leave request amended.');leavePage()}catch(e){toast(e.message||'Unable to amend request')}
+ }});
+ $('main').querySelectorAll('[data-lv-cancel]').forEach(function(b){b.onclick=async function(){
+  var id=b.getAttribute('data-lv-cancel');if(!confirm('Cancel this pending leave request?'))return;
+  try{var res=await fetch(API+'/api/leave/'+encodeURIComponent(id),{method:'PATCH',headers:headers(),body:JSON.stringify({action:'cancel'})});var x=await res.json();if(!res.ok)throw new Error(x.error||'Unable to cancel request');applyState(x.state);toast('Leave request cancelled.');leavePage()}catch(e){toast(e.message||'Unable to cancel request')}
+ }});
+ $('lvSubmit').onclick=async function(){var type=$('lvType').value,start=$('lvStart').value,end=$('lvEnd').value,reason=$('lvReason').value.trim();if(!type||!start||!end||!reason)return toast('Complete the leave type, dates and reason.');if(end<start)return toast('End date cannot be earlier than start date.');var attachment=null,f=$('lvFile').files&&$('lvFile').files[0];if(f){try{attachment=await fileData(f,2*1024*1024)}catch(e){return toast(e.message)}}var row={id:'ANREM-LV-'+Date.now()+'-'+Math.random().toString(36).slice(2,7),uid:String(currentUser.uid||p.uid),name:currentUser.name||p.name,staffId:String(currentUser.uid||p.uid),leaveType:type,startDate:start,endDate:end,reason:reason,contact:$('lvContact').value.trim(),attachment:attachment,createdAt:new Date().toISOString(),status:'Pending',adminComment:'',offlineCreated:!navigator.onLine};var all=leaveRequests();all.push(row);applyState({anrem_leave_requests:all});if(!navigator.onLine){markPending('leave');toast('Leave request saved on this device and queued for Admin sync.');leavePage();return}try{var res=await fetch(API+'/api/snapshot/anrem_leave_requests',{method:'POST',headers:headers(),body:JSON.stringify({value:all})});var x=await res.json();if(!res.ok)throw new Error(x.error||'Unable to submit leave request');applyState(x.state);clearPending('leave');toast('Leave request submitted to Admin.');leavePage()}catch(e){markPending('leave');toast('Leave request saved locally and queued for Admin sync.');leavePage()}}
 }
 
 function dailyPage(){
@@ -216,21 +357,54 @@ function weekKey(d){
 function pendingItems(){return stateGet('anrem_offline_pending',[])}
 function markPending(kind){var q=pendingItems();if(q.indexOf(kind)<0)q.push(kind);applyState({anrem_offline_pending:q});updateSyncBadge()}
 function clearPending(kind){var q=pendingItems().filter(function(x){return x!==kind});applyState({anrem_offline_pending:q});updateSyncBadge()}
-function updateSyncBadge(){var q=pendingItems();var el=$('offlineStatus');if(el)el.textContent=(navigator.onLine?'Online':'Offline')+(q.length?( ' • '+q.length+' item type(s) waiting to sync'):' • All synced')}
-async function syncPending(){if(!navigator.onLine||!token()||!pendingItems().length)return;try{
- var sr=await fetch(API+'/api/state',{headers:headers()});if(!sr.ok)throw new Error('state');var cloud=await sr.json();
- var localAtt=attendance(),cloudAtt=Array.isArray(cloud.rcs_att)?cloud.rcs_att:[];
- var key=function(r){return String(r.id||[r.uid,r.date,r.time,r.session].join('|'))};var seen={};cloudAtt.forEach(function(r){seen[key(r)]=1});localAtt.forEach(function(r){if(!seen[key(r)]){cloudAtt.push(r);seen[key(r)]=1}});
- var localRep=reports(),cloudRep=Array.isArray(cloud.anrem_daily_reports)?cloud.anrem_daily_reports:[];var rseen={};cloudRep.forEach(function(r){rseen[String(r.id)]=1});localRep.forEach(function(r){if(!rseen[String(r.id)]){cloudRep.push(r);rseen[String(r.id)]=1}});
- if(pendingItems().indexOf('attendance')>=0){var ar=await fetch(API+'/api/attendance/sync',{method:'POST',headers:headers(),body:JSON.stringify({value:cloudAtt})});if(!ar.ok)throw new Error('attendance');var ax=await ar.json();if(ax.state)applyState(ax.state);else applyState({rcs_att:cloudAtt});clearPending('attendance')}
- if(pendingItems().indexOf('reports')>=0){var rr=await fetch(API+'/api/snapshot/anrem_daily_reports',{method:'POST',headers:headers(),body:JSON.stringify({value:cloudRep})});if(!rr.ok)throw new Error('reports');var rx=await rr.json();if(rx.state)applyState(rx.state);else applyState({anrem_daily_reports:cloudRep});clearPending('reports')}
- toast('Offline records synchronised');
- }catch(e){updateSyncBadge()}}
-window.addEventListener('online',function(){updateSyncBadge();syncPending()});window.addEventListener('offline',updateSyncBadge);
+function updateSyncBadge(){var q=pendingItems(),total=q.length+emergencyQueue().length;var el=$('offlineStatus');if(el)el.textContent=(navigator.onLine?'Online':'Offline')+(total?( ' • '+total+' item type(s) waiting to sync'):' • All synced')}
+async function syncPending(){
+ if(!navigator.onLine||!token()||!pendingItems().length)return;
+ try{
+  var uid=String(currentUser&&currentUser.uid||'');if(!uid)throw new Error('Staff identity is missing. Please sign in again.');
+  var localAtt=attendance(),localRep=reports(),localLeave=leaveRequests();
+  var sr=await fetch(API+'/api/state',{headers:headers()});if(!sr.ok)throw new Error('Unable to load cloud records');var cloud=await sr.json();
+  if(pendingItems().indexOf('attendance')>=0){
+   var cloudAtt=Array.isArray(cloud.rcs_att)?cloud.rcs_att:[];
+   var key=function(r){return String(r.id||r._eventId||[r.uid,r.date,r.time,r.session].join('|'))};
+   var seen={};cloudAtt.forEach(function(r){seen[key(r)]=1});localAtt.forEach(function(r){if(!seen[key(r)]){cloudAtt.push(r);seen[key(r)]=1}});
+   var ar=await fetch(API+'/api/attendance/sync',{method:'POST',headers:headers(),body:JSON.stringify({value:cloudAtt})});
+   var ax=await ar.json();if(!ar.ok)throw new Error(ax.error||'Attendance sync failed');
+   var savedAtt=Array.isArray(ax.state&&ax.state.rcs_att)?ax.state.rcs_att:[];
+   var savedAttKeys={};savedAtt.forEach(function(r){savedAttKeys[key(r)]=1});
+   if(localAtt.some(function(r){return String(r.uid||'')===uid&&!savedAttKeys[key(r)]}))throw new Error('The server did not confirm every attendance record. Your offline copy has been kept for retry.');
+   if(ax.state)applyState(ax.state);clearPending('attendance');
+  }
+  if(pendingItems().indexOf('reports')>=0){
+   var cloudRep=Array.isArray(cloud.anrem_daily_reports)?cloud.anrem_daily_reports:[];
+   var rseen={};cloudRep.forEach(function(r){rseen[String(r.id)]=1});
+   localRep.forEach(function(r){var copy=Object.assign({},r,{uid:uid,name:String(currentUser.name||r.name||'')});if(!rseen[String(copy.id)]){cloudRep.push(copy);rseen[String(copy.id)]=1}});
+   var rr=await fetch(API+'/api/snapshot/anrem_daily_reports',{method:'POST',headers:headers(),body:JSON.stringify({value:cloudRep})});
+   var rx=await rr.json();if(!rr.ok)throw new Error(rx.error||'Weekly report sync failed');
+   var savedRep=Array.isArray(rx.state&&rx.state.anrem_daily_reports)?rx.state.anrem_daily_reports:[];
+   var repIds=new Set(savedRep.map(function(x){return String(x.id)}));
+   if(localRep.some(function(x){return !repIds.has(String(x.id))}))throw new Error('The server did not confirm every weekly report. Your offline copy has been kept for retry.');
+   applyState(rx.state);clearPending('reports');
+  }
+  if(pendingItems().indexOf('leave')>=0){
+   var cloudLeave=Array.isArray(cloud.anrem_leave_requests)?cloud.anrem_leave_requests:[];
+   var lseen={};cloudLeave.forEach(function(r){lseen[String(r.id)]=1});
+   localLeave.forEach(function(r){var copy=Object.assign({},r,{uid:uid,name:String(currentUser.name||r.name||''),staffId:uid});if(!lseen[String(copy.id)]){cloudLeave.push(copy);lseen[String(copy.id)]=1}});
+   var lr=await fetch(API+'/api/snapshot/anrem_leave_requests',{method:'POST',headers:headers(),body:JSON.stringify({value:cloudLeave})});
+   var lx=await lr.json();if(!lr.ok)throw new Error(lx.error||'Leave request sync failed');
+   var savedLeave=Array.isArray(lx.state&&lx.state.anrem_leave_requests)?lx.state.anrem_leave_requests:[];
+   var leaveIds=new Set(savedLeave.map(function(x){return String(x.id)}));
+   if(localLeave.some(function(x){return !leaveIds.has(String(x.id))}))throw new Error('The server did not confirm every leave request. Your offline copy has been kept for retry.');
+   applyState(lx.state);clearPending('leave');
+  }
+  toast('Offline records synchronised and verified.');
+ }catch(e){updateSyncBadge();toast(e.message||'Some offline records could not be synchronised. They remain queued.')}
+}
+window.addEventListener('online',function(){updateSyncBadge();syncPending();syncEmergencyQueue()});window.addEventListener('offline',updateSyncBadge);
 function showApp(){
  $('login').classList.add('hide');$('app').classList.remove('hide');
  $('who').textContent=currentUser.name+' (Staff)';
- makeTabs();nav('clock');updateSyncBadge();if(navigator.onLine)syncPending();
+ makeTabs();nav('clock');updateSyncBadge();if(navigator.onLine){syncPending();syncEmergencyQueue();}
 }
 function logout(){
  currentUser=null;

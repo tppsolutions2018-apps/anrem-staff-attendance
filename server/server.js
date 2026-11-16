@@ -17,6 +17,7 @@ if(!DATABASE_URL) throw new Error('DATABASE_URL must be set to a Render PostgreS
 const pool=new Pool({connectionString:DATABASE_URL,max:10,idleTimeoutMillis:30000});
 
 function normalizeRole(r){const s=String(r||'').trim().toLowerCase();return s==='teacher'||s==='staff'?'Staff':s==='admin'||s==='administrator'?'Admin':s==='student'?'Student':r}
+function isAdminUser(user){return normalizeRole(user&&user.role)==='Admin'}
 function safeUser(u){if(!u||typeof u!=='object')return null;const x=Object.assign({},u);delete x.password;delete x.loginPassword;delete x.staffPassword;return x}
 function stripPerson(p){if(!p||typeof p!=='object')return p;const x=Object.assign({},p);delete x.loginPassword;delete x.staffPassword;return x}
 function issue(user){return jwt.sign({username:user.username,role:user.role,uid:user.uid||null},JWT_SECRET,{expiresIn:'12h'})}
@@ -45,7 +46,9 @@ async function sanitizeStateFor(user){
       rcs_users:(Array.isArray(allUsers)?allUsers:[]).filter(Boolean).map(safeUser),
       rcs_greports:await getSnapshot('rcs_greports',[]),
       rcs_att:await getAllAttendance(),
-      anrem_daily_reports:await getSnapshot('anrem_daily_reports',[])
+      anrem_daily_reports:await getSnapshot('anrem_daily_reports',[]),
+      anrem_emergency_reports:await getSnapshot('anrem_emergency_reports',[]),
+      anrem_leave_requests:await getSnapshot('anrem_leave_requests',[])
     };
   }
   const uid=String(user.uid||'');
@@ -53,7 +56,11 @@ async function sanitizeStateFor(user){
   const myAtt=uid ? (await pool.query('SELECT payload FROM attendance WHERE uid=$1 ORDER BY created_at ASC',[uid])).rows.map(x=>x.payload) : [];
   const allDaily=await getSnapshot('anrem_daily_reports',[]);
   const myDaily=(Array.isArray(allDaily)?allDaily:[]).filter(r=>r&&String(r.uid||'')===uid);
-  return {rcs_people:mine,rcs_users:(Array.isArray(allUsers)?allUsers:[]).filter(u=>u&&String(u.uid||'')===uid).map(safeUser),rcs_greports:[],rcs_att:myAtt,anrem_daily_reports:myDaily};
+  const emergencies=await getSnapshot('anrem_emergency_reports',[]);
+  const myEmergencies=(Array.isArray(emergencies)?emergencies:[]).filter(r=>r&&String(r.uid||'')===uid);
+  const leaveRequests=await getSnapshot('anrem_leave_requests',[]);
+  const myLeaveRequests=(Array.isArray(leaveRequests)?leaveRequests:[]).filter(r=>r&&String(r.uid||'')===uid);
+  return {rcs_people:mine,rcs_users:(Array.isArray(allUsers)?allUsers:[]).filter(u=>u&&String(u.uid||'')===uid).map(safeUser),rcs_greports:[],rcs_att:myAtt,anrem_daily_reports:myDaily,anrem_emergency_reports:myEmergencies,anrem_leave_requests:myLeaveRequests};
 }
 
 async function syncAuthFromUsers(users){
@@ -112,6 +119,7 @@ async function init(){
   if((await pool.query("SELECT 1 FROM snapshots WHERE key='rcs_users'")).rowCount===0) await saveSnapshot('rcs_users',[{name:'Administrator',username:ADMIN_USER,password:'',role:'Admin',active:true}]);
   if((await pool.query("SELECT 1 FROM snapshots WHERE key='rcs_greports'")).rowCount===0) await saveSnapshot('rcs_greports',[]);
   if((await pool.query("SELECT 1 FROM snapshots WHERE key='anrem_daily_reports'")).rowCount===0) await saveSnapshot('anrem_daily_reports',[]);
+  for(const key of ['anrem_emergency_reports','anrem_leave_requests']) await pool.query('INSERT INTO snapshots(key,value) VALUES($1,$2::jsonb) ON CONFLICT(key) DO NOTHING',[key,'[]']);
   const hash=await bcrypt.hash(ADMIN_PASS,12);
   await pool.query(`INSERT INTO auth(username,password_hash,name,role,uid,active) VALUES($1,$2,'Administrator','Admin',NULL,TRUE)
     ON CONFLICT(username) DO UPDATE SET password_hash=EXCLUDED.password_hash,name='Administrator',role='Admin',uid=NULL,active=TRUE`,[ADMIN_USER,hash]);
@@ -169,42 +177,233 @@ app.delete('/api/staff/:uid',auth,adminOnly,async(req,res)=>{
 app.post('/api/snapshot/:key',auth,async(req,res)=>{
   try{
     const key=req.params.key;
-    const value=Array.isArray(req.body.value)?req.body.value:[];
-    if(key==='anrem_daily_reports'){
-      const incoming=value.filter(r=>r&&String(r.uid||'')===String(req.user.uid||''));
-      if(req.user.role==='Admin'){
-        await saveSnapshot(key,value);
-      }else{
-        const existing=await getSnapshot(key,[]);
-        const others=(Array.isArray(existing)?existing:[]).filter(r=>r&&String(r.uid||'')!==String(req.user.uid||''));
-        await saveSnapshot(key,others.concat(incoming));
+    const value=Array.isArray(req.body&&req.body.value)?req.body.value:[];
+    const admin=isAdminUser(req.user);
+    const uid=String(req.user.uid||'');
+    if(['anrem_daily_reports','anrem_emergency_reports','anrem_leave_requests'].includes(key)){
+      if(admin){
+        await replaceSnapshotLocked(key,value);
+        return res.json({ok:true,state:await sanitizeStateFor(req.user)});
+      }
+      if(!uid)return res.status(403).json({error:'Staff identity is missing'});
+
+      const people=await getSnapshot('rcs_people',[]);
+      const staff=(Array.isArray(people)?people:[]).find(p=>p&&String(p.uid||'')===uid&&normalizeRole(p.role)==='Staff');
+      if(!staff)return res.status(403).json({error:'Active Staff profile not found'});
+      const submitted=value.filter(r=>r&&String(r.id||''));
+      if(submitted.some(r=>String(r.uid||'')!==uid))return res.status(403).json({error:'One or more queued records do not match the signed-in Staff account. Nothing was synchronised; please refresh and retry.'});
+
+      if(key==='anrem_daily_reports'){
+        const incoming=submitted;
+        await updateSnapshotRecord(key,rows=>{
+          return mergeNewerRecords(rows,incoming);
+        });
+      }else if(key==='anrem_emergency_reports'){
+        const incoming=submitted;
+        await updateSnapshotRecord(key,rows=>{
+          const seen=new Set(rows.map(r=>String(r&&r.id||'')));
+          const additions=incoming.filter(r=>!seen.has(String(r.id))).map(r=>({
+            id:String(r.id),
+            uid:uid,
+            name:String(staff.name||''),
+            title:String(r.title||'').trim().slice(0,180),
+            details:String(r.details||'').trim().slice(0,12000),
+            attachments:Array.isArray(r.attachments)?r.attachments:[],
+            createdAt:r.createdAt||new Date().toISOString(),
+            date:r.date||new Date().toISOString().slice(0,10),
+            time:r.time||'',
+            status:'Submitted',
+            syncedAt:new Date().toISOString()
+          }));
+          if(additions.some(r=>!r.title||!r.details))throw requestError('Emergency report title and details are required',400);
+          return rows.concat(additions);
+        });
+      }else if(key==='anrem_leave_requests'){
+        const incoming=value.filter(r=>r&&String(r.uid||'')===uid&&String(r.id||''));
+        await updateSnapshotRecord(key,rows=>{
+          const seen=new Set(rows.map(r=>String(r&&r.id||'')));
+          const additions=incoming.filter(r=>!seen.has(String(r.id))).map(r=>({
+            id:String(r.id),
+            uid:uid,
+            name:String(staff.name||''),
+            staffId:uid,
+            leaveType:String(r.leaveType||'').trim().slice(0,80),
+            startDate:String(r.startDate||'').slice(0,10),
+            endDate:String(r.endDate||'').slice(0,10),
+            reason:String(r.reason||'').trim().slice(0,3000),
+            contact:String(r.contact||'').slice(0,500),
+            attachment:r.attachment||null,
+            createdAt:r.createdAt||new Date().toISOString(),
+            status:'Pending',
+            adminComment:'',
+            offlineCreated:!!r.offlineCreated
+          }));
+          if(additions.some(r=>!r.leaveType||!/^\d{4}-\d{2}-\d{2}$/.test(r.startDate)||!/^\d{4}-\d{2}-\d{2}$/.test(r.endDate)||r.endDate<r.startDate||!r.reason)){
+            throw requestError('Please provide a valid leave type, date range and reason',400);
+          }
+          return rows.concat(additions);
+        });
       }
       return res.json({ok:true,state:await sanitizeStateFor(req.user)});
     }
     if(!['rcs_people','rcs_users','rcs_greports'].includes(key))return res.status(400).json({error:'Invalid key'});
-    if(req.user.role!=='Admin')return res.status(403).json({error:'Admin only'});
-    await saveSnapshot(key,value);
+    if(!admin)return res.status(403).json({error:'Admin only'});
+    await replaceSnapshotLocked(key,value);
     if(key==='rcs_users')await syncAuthFromUsers(value);
     res.json({ok:true,state:await sanitizeStateFor(req.user)});
-  }catch(e){console.error(e);res.status(500).json({error:'Unable to save data'})}
+  }catch(e){console.error(e);res.status(e.status||500).json({error:e.message||'Unable to save data'})}
 });
+
+// ANREM feature parity: Staff emergency reports and leave requests.
+// These routes keep each report collection scoped by authenticated UID,
+// while only Admin users can review/decide all staff requests.
+async function updateSnapshotRecord(key,mutator){
+  const client=await pool.connect();
+  try{
+    await client.query('BEGIN');
+    await client.query('INSERT INTO snapshots(key,value) VALUES($1,$2::jsonb) ON CONFLICT(key) DO NOTHING',[key,'[]']);
+    const q=await client.query('SELECT value FROM snapshots WHERE key=$1 FOR UPDATE',[key]);
+    const rows=q.rowCount&&Array.isArray(q.rows[0].value)?q.rows[0].value:[];
+    const next=await mutator(rows);
+    await client.query('UPDATE snapshots SET value=$2::jsonb WHERE key=$1',[key,JSON.stringify(next)]);
+    await client.query('COMMIT');
+    return next;
+  }catch(e){await client.query('ROLLBACK');throw e}finally{client.release()}
+}
+function requestError(message,status){return Object.assign(new Error(message),{status:status||400})}
+function recordVersion(record){
+  if(!record||typeof record!=='object')return 0;
+  const candidates=[record.updatedAt,record.modifiedAt,record.lastModifiedAt,record.submittedAt,record.createdAt,record.timestamp,record.date];
+  for(const value of candidates){
+    if(value==null||value==='')continue;
+    const n=typeof value==='number'?value:Date.parse(String(value));
+    if(Number.isFinite(n))return n;
+  }
+  return 0;
+}
+function mergeNewerRecords(existing,incoming){
+  const byId=new Map();
+  for(const row of existing||[]){const id=String(row&&(row.id||row.reportId)||'');if(id)byId.set(id,row);}
+  for(const row of incoming||[]){
+    const id=String(row&&(row.id||row.reportId)||'');if(!id)continue;
+    const old=byId.get(id);
+    if(!old||recordVersion(row)>=recordVersion(old))byId.set(id,row);
+  }
+  return Array.from(byId.values());
+}
+async function replaceSnapshotLocked(key,value){
+  return updateSnapshotRecord(key,()=>value);
+}
+
+app.patch('/api/emergency/:id',auth,async(req,res)=>{
+  try{
+    const id=String(req.params.id||'');
+    await updateSnapshotRecord('anrem_emergency_reports',rows=>{
+      const r=rows.find(x=>x&&String(x.id)===id);
+      if(!r)throw requestError('Emergency report not found',404);
+      if(!isAdminUser(req.user)&&String(r.uid||'')!==String(req.user.uid||''))throw requestError('You can edit only your own emergency reports',403);
+      const body=req.body||{};
+      if(body.title!==undefined)r.title=String(body.title).trim().slice(0,180);
+      if(body.details!==undefined)r.details=String(body.details).trim().slice(0,12000);
+      if(body.attachments!==undefined&&Array.isArray(body.attachments))r.attachments=body.attachments;
+      r.updatedAt=new Date().toISOString();
+      return rows;
+    });
+    res.json({ok:true,state:await sanitizeStateFor(req.user)});
+  }catch(e){res.status(e.status||500).json({error:e.message||'Unable to update emergency report'})}
+});
+app.delete('/api/emergency/:id',auth,async(req,res)=>{
+  try{
+    const id=String(req.params.id||'');
+    await updateSnapshotRecord('anrem_emergency_reports',rows=>{
+      const r=rows.find(x=>x&&String(x.id)===id);
+      if(!r)throw requestError('Emergency report not found',404);
+      if(!isAdminUser(req.user)&&String(r.uid||'')!==String(req.user.uid||''))throw requestError('You can delete only your own emergency reports',403);
+      return rows.filter(x=>!x||String(x.id)!==id);
+    });
+    res.json({ok:true,state:await sanitizeStateFor(req.user)});
+  }catch(e){res.status(e.status||500).json({error:e.message||'Unable to delete emergency report'})}
+});
+app.patch('/api/leave/:id',auth,async(req,res)=>{
+  try{
+    const id=String(req.params.id||'');
+    await updateSnapshotRecord('anrem_leave_requests',rows=>{
+      const r=rows.find(x=>x&&String(x.id)===id);
+      if(!r)throw requestError('Leave request not found',404);
+      if(isAdminUser(req.user)){
+        const action=String((req.body||{}).action||'');
+        if(action==='reopen'){
+          if(!['approved','rejected'].includes(String(r.status||'').toLowerCase()))throw requestError('Only an approved or rejected request can be reopened',409);
+          r.status='Pending';r.adminComment='';r.reviewedAt=null;r.reopenedAt=new Date().toISOString();
+        }else if(action==='approve'||action==='reject'){
+          if(String(r.status||'Pending').toLowerCase()!=='pending')throw requestError('Reopen this request before changing its decision',409);
+          r.status=action==='approve'?'Approved':'Rejected';
+          r.adminComment=String((req.body||{}).comment||'').slice(0,2000);
+          r.reviewedAt=new Date().toISOString();
+        }else throw requestError('Invalid administrator action',400);
+      }else{
+        if(String(r.uid||'')!==String(req.user.uid||''))throw requestError('You can manage only your own leave requests',403);
+        const action=String((req.body||{}).action||'');
+        if(action==='cancel'){
+          if(String(r.status||'Pending').toLowerCase()!=='pending')throw requestError('Only pending requests can be cancelled',409);
+          r.status='Cancelled';r.cancelledAt=new Date().toISOString();
+        }else if(action==='amend'){
+          if(String(r.status||'Pending').toLowerCase()!=='pending')throw requestError('Only pending requests can be amended',409);
+          const b=req.body||{};
+          if(b.leaveType!==undefined)r.leaveType=String(b.leaveType).slice(0,80);
+          if(b.startDate!==undefined)r.startDate=String(b.startDate).slice(0,10);
+          if(b.endDate!==undefined)r.endDate=String(b.endDate).slice(0,10);
+          if(b.reason!==undefined)r.reason=String(b.reason).slice(0,3000);
+          if(b.contact!==undefined)r.contact=String(b.contact).slice(0,500);
+        }else throw requestError('Invalid staff action',400);
+      }
+      return rows;
+    });
+    res.json({ok:true,state:await sanitizeStateFor(req.user)});
+  }catch(e){res.status(e.status||500).json({error:e.message||'Unable to update leave request'})}
+});
+
 app.post('/api/attendance/sync',auth,async(req,res)=>{
   try{
-    const incoming=Array.isArray(req.body.value)?req.body.value:[];
-    const allowed=req.user.role==='Admin'?incoming:incoming.filter(r=>r&&String(r.uid||'')===String(req.user.uid||''));
-    await upsertAttendance(allowed);
+    const incoming=Array.isArray(req.body&&req.body.value)?req.body.value:[];
+    if(!isAdminUser(req.user)){
+      const uid=String(req.user.uid||'');
+      if(!uid)return res.status(403).json({error:'Staff identity is missing'});
+      const people=await getSnapshot('rcs_people',[]);
+      const staff=(Array.isArray(people)?people:[]).find(p=>p&&String(p.uid||'')===uid&&normalizeRole(p.role)==='Staff'&&p.paused!==true&&p.active!==false);
+      if(!staff)return res.status(403).json({error:'Active Staff profile not found'});
+      if(incoming.some(r=>r&&String(r.uid||'')!==uid))return res.status(403).json({error:'One or more attendance records do not match the signed-in Staff account. Nothing was synchronised; please refresh and retry.'});
+    }
+    await upsertAttendance(incoming);
     res.json({ok:true,state:await sanitizeStateFor(req.user)});
   }catch(e){console.error(e);res.status(500).json({error:'Unable to sync attendance'})}
 });
-app.put('/api/attendance/:id',auth,adminOnly,async(req,res)=>{
+app.put('/api/attendance/:id',auth,async(req,res)=>{
+  const client=await pool.connect();
   try{
-    const id=String(req.params.id);const q=await pool.query('SELECT payload FROM attendance WHERE event_id=$1',[id]);if(!q.rowCount)return res.status(404).json({error:'Attendance record not found'});
-    const next=Object.assign({},q.rows[0].payload,req.body||{},{_eventId:id});
-    await pool.query('UPDATE attendance SET uid=$1,payload=$2::jsonb WHERE event_id=$3',[String(next.uid||''),JSON.stringify(next),id]);
+    await client.query('BEGIN');
+    const id=String(req.params.id);
+    const q=await client.query('SELECT payload FROM attendance WHERE event_id=$1 FOR UPDATE',[id]);
+    if(!q.rowCount){await client.query('ROLLBACK');return res.status(404).json({error:'Attendance record not found'});}
+    const old=q.rows[0].payload||{};
+    const admin=isAdminUser(req.user);
+    if(!admin&&String(old.uid||'')!==String(req.user.uid||'')){await client.query('ROLLBACK');return res.status(403).json({error:'You can only edit your own attendance'});}
+    const allowed=admin?(req.body||{}):{date:req.body&&req.body.date,time:req.body&&req.body.time};
+    const next=Object.assign({},old,allowed,{_eventId:id,uid:old.uid,name:old.name,role:old.role});
+    await client.query('UPDATE attendance SET uid=$1,payload=$2::jsonb WHERE event_id=$3',[String(next.uid||''),JSON.stringify(next),id]);
+    await client.query('COMMIT');
     res.json({ok:true,state:await sanitizeStateFor(req.user)});
-  }catch(e){console.error(e);res.status(500).json({error:'Unable to edit attendance'})}
+  }catch(e){await client.query('ROLLBACK');console.error(e);res.status(500).json({error:'Unable to edit attendance'});}
+  finally{client.release()}
 });
-app.delete('/api/attendance/:id',auth,adminOnly,async(req,res)=>{try{await pool.query('DELETE FROM attendance WHERE event_id=$1',[String(req.params.id)]);res.json({ok:true,state:await sanitizeStateFor(req.user)})}catch(e){console.error(e);res.status(500).json({error:'Unable to delete attendance'})}});
+app.delete('/api/attendance/:id',auth,async(req,res)=>{
+  try{
+    const id=String(req.params.id),admin=isAdminUser(req.user);
+    const result=await pool.query('DELETE FROM attendance WHERE event_id=$1 AND ($2::boolean OR uid=$3)',[id,admin,String(req.user.uid||'')]);
+    if(!result.rowCount)return res.status(404).json({error:'Attendance record not found or not owned by this Staff member'});
+    res.json({ok:true,state:await sanitizeStateFor(req.user)});
+  }catch(e){console.error(e);res.status(500).json({error:'Unable to delete attendance'})}
+});
 app.post('/api/import',auth,adminOnly,async(req,res)=>{
   try{
     const incoming=req.body||{};
@@ -212,6 +411,8 @@ app.post('/api/import',auth,adminOnly,async(req,res)=>{
     if(Array.isArray(incoming.rcs_users)){await saveSnapshot('rcs_users',incoming.rcs_users);await syncAuthFromUsers(incoming.rcs_users)}
     if(Array.isArray(incoming.rcs_greports))await saveSnapshot('rcs_greports',incoming.rcs_greports);
     if(Array.isArray(incoming.anrem_daily_reports))await saveSnapshot('anrem_daily_reports',incoming.anrem_daily_reports);
+    if(Array.isArray(incoming.anrem_emergency_reports))await saveSnapshot('anrem_emergency_reports',incoming.anrem_emergency_reports);
+    if(Array.isArray(incoming.anrem_leave_requests))await saveSnapshot('anrem_leave_requests',incoming.anrem_leave_requests);
     if(Array.isArray(incoming.rcs_att))await upsertAttendance(incoming.rcs_att);
     res.json({ok:true,state:await sanitizeStateFor(req.user)});
   }catch(e){console.error(e);res.status(500).json({error:'Unable to import backup'})}
@@ -219,7 +420,7 @@ app.post('/api/import',auth,adminOnly,async(req,res)=>{
 app.get('/api/export',auth,adminOnly,async(req,res)=>{
   try{
     const users=(await getSnapshot('rcs_users',[])).map(u=>{const x=Object.assign({},u);delete x.password;delete x.loginPassword;delete x.staffPassword;return x});
-    const payload={rcs_people:await getSnapshot('rcs_people',[]),rcs_users:users,rcs_greports:await getSnapshot('rcs_greports',[]),anrem_daily_reports:await getSnapshot('anrem_daily_reports',[]),rcs_att:await getAllAttendance()};
+    const payload={rcs_people:await getSnapshot('rcs_people',[]),rcs_users:users,rcs_greports:await getSnapshot('rcs_greports',[]),anrem_daily_reports:await getSnapshot('anrem_daily_reports',[]),anrem_emergency_reports:await getSnapshot('anrem_emergency_reports',[]),anrem_leave_requests:await getSnapshot('anrem_leave_requests',[]),rcs_att:await getAllAttendance()};
     res.setHeader('Content-Type','application/json');res.setHeader('Content-Disposition','attachment; filename="anrem-staff-attendance-backup.json"');res.send(JSON.stringify(payload,null,2));
   }catch(e){console.error(e);res.status(500).json({error:'Unable to export backup'})}
 });
