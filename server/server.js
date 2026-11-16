@@ -365,9 +365,16 @@ app.patch('/api/leave/:id',auth,async(req,res)=>{
 
 app.post('/api/attendance/sync',auth,async(req,res)=>{
   try{
-    const incoming=Array.isArray(req.body.value)?req.body.value:[];
-    const allowed=req.user.role==='Admin'?incoming:incoming.filter(r=>r&&String(r.uid||'')===String(req.user.uid||''));
-    await upsertAttendance(allowed);
+    const incoming=Array.isArray(req.body&&req.body.value)?req.body.value:[];
+    if(!isAdminUser(req.user)){
+      const uid=String(req.user.uid||'');
+      if(!uid)return res.status(403).json({error:'Staff identity is missing'});
+      const people=await getSnapshot('rcs_people',[]);
+      const staff=(Array.isArray(people)?people:[]).find(p=>p&&String(p.uid||'')===uid&&normalizeRole(p.role)==='Staff'&&p.paused!==true&&p.active!==false);
+      if(!staff)return res.status(403).json({error:'Active Staff profile not found'});
+      if(incoming.some(r=>r&&String(r.uid||'')!==uid))return res.status(403).json({error:'One or more attendance records do not match the signed-in Staff account. Nothing was synchronised; please refresh and retry.'});
+    }
+    await upsertAttendance(incoming);
     res.json({ok:true,state:await sanitizeStateFor(req.user)});
   }catch(e){console.error(e);res.status(500).json({error:'Unable to sync attendance'})}
 });
@@ -397,7 +404,6 @@ app.delete('/api/attendance/:id',auth,async(req,res)=>{
     res.json({ok:true,state:await sanitizeStateFor(req.user)});
   }catch(e){console.error(e);res.status(500).json({error:'Unable to delete attendance'})}
 });
-app.delete('/api/attendance/:id',auth,adminOnly,async(req,res)=>{try{await pool.query('DELETE FROM attendance WHERE event_id=$1',[String(req.params.id)]);res.json({ok:true,state:await sanitizeStateFor(req.user)})}catch(e){console.error(e);res.status(500).json({error:'Unable to delete attendance'})}});
 app.post('/api/import',auth,adminOnly,async(req,res)=>{
   try{
     const incoming=req.body||{};
