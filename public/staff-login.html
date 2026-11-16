@@ -103,19 +103,23 @@ async function syncEmergencyQueue(){
  if(!navigator.onLine||!token())return false;
  var q=emergencyQueue();if(!q.length)return true;
  try{
-  var st=await fetch(API+'/api/state',{headers:headers()});if(!st.ok)throw new Error('state');
+  var uid=String(currentUser&&currentUser.uid||'');if(!uid)throw new Error('Staff identity is missing. Please sign in again.');
+  var st=await fetch(API+'/api/state',{headers:headers()});if(!st.ok)throw new Error('Unable to load cloud records');
   var cloud=await st.json(),current=Array.isArray(cloud.anrem_emergency_reports)?cloud.anrem_emergency_reports:[];
   var byId={};current.forEach(function(x){byId[String(x.id)]=x});
-  q.forEach(function(x){
-   var existing=byId[String(x.id)];
-   if(!existing){x.status='Submitted';x.syncedAt=new Date().toISOString();current.push(x);byId[String(x.id)]=x;}
-   else{existing.status='Submitted';existing.syncedAt=existing.syncedAt||new Date().toISOString();}
+  var expected=[];
+  q.forEach(function(raw){
+   var x=Object.assign({},raw,{uid:uid,name:String(currentUser.name||raw.name||''),status:'Submitted',syncedAt:new Date().toISOString()});
+   expected.push(String(x.id));
+   if(!byId[String(x.id)]){current.push(x);byId[String(x.id)]=x;}
   });
   var res=await fetch(API+'/api/snapshot/anrem_emergency_reports',{method:'POST',headers:headers(),body:JSON.stringify({value:current})});
   var out=await res.json();if(!res.ok)throw new Error(out.error||'Emergency sync failed');
-  applyState(out.state||{anrem_emergency_reports:current});applyState({anrem_emergency_queue:[]});
-  return true;
- }catch(e){updateSyncBadge();return false}
+  var saved=Array.isArray(out.state&&out.state.anrem_emergency_reports)?out.state.anrem_emergency_reports:[];
+  var savedIds=new Set(saved.map(function(x){return String(x.id)}));
+  if(expected.some(function(id){return !savedIds.has(id)}))throw new Error('The server did not confirm every emergency report. Your offline copy has been kept for retry.');
+  applyState(out.state);applyState({anrem_emergency_queue:[]});updateSyncBadge();return true;
+ }catch(e){updateSyncBadge();toast(e.message||'Emergency sync failed. Your offline copy is retained.');return false}
 }
 
 function makeTabs(){
@@ -261,7 +265,7 @@ function emergencyPage(){
  }catch(e){toast(e.message||'Microphone unavailable. Check permission or attach an audio file.')}};
  $('erStop').onclick=function(){if(recorder&&recorder.state!=='inactive')recorder.stop()};
  $('erCancel').onclick=function(){if(recorder&&recorder.state!=='inactive'){recorder.onstop=function(){if(stream)stream.getTracks().forEach(function(t){t.stop()});stream=null};recorder.stop()}recorded=null;$('erAudio').removeAttribute('src');$('erAudio').load();stopTimer();$('erRecStatus').textContent='Recording cancelled';$('erRecord').disabled=false;$('erStop').disabled=true;$('erCancel').disabled=true};
- $('erSubmit').onclick=async function(){var title=$('erTitle').value.trim(),details=$('erDetails').value.trim();if(!title||!details)return toast('Enter an incident title and details.');try{if(recorder&&recorder.state!=='inactive')return toast('Finish or cancel the voice recording first.');var files=[];for(var f of Array.from($('erFiles').files||[])){var x=await fileData(f,3*1024*1024);if(x)files.push(x)}if(recorded){var audioFile=new File([recorded],'voice-recording.webm',{type:recorded.type||'audio/webm'});var voiceData=await fileData(audioFile,3*1024*1024);if(voiceData)files.push(voiceData)}var row={id:'ANREM-ER-'+Date.now(),uid:p.uid,name:p.name,title:title,details:details,attachments:files,createdAt:new Date().toISOString(),date:today(),time:now(),status:'Queued'};var all=emergencyReports();all.push(row);applyState({anrem_emergency_reports:all});var q=emergencyQueue();q.push(row);applyState({anrem_emergency_queue:q});var synced=await syncEmergencyQueue();toast(synced?'Emergency report submitted to Admin.':'Emergency report saved on this device and queued for sync.');emergencyPage()}catch(e){toast(e.message||'Emergency report not submitted')}};
+ $('erSubmit').onclick=async function(){var title=$('erTitle').value.trim(),details=$('erDetails').value.trim();if(!title||!details)return toast('Enter an incident title and details.');try{if(recorder&&recorder.state!=='inactive')return toast('Finish or cancel the voice recording first.');var files=[];for(var f of Array.from($('erFiles').files||[])){var x=await fileData(f,3*1024*1024);if(x)files.push(x)}if(recorded){var audioFile=new File([recorded],'voice-recording.webm',{type:recorded.type||'audio/webm'});var voiceData=await fileData(audioFile,3*1024*1024);if(voiceData)files.push(voiceData)}var row={id:'ANREM-ER-'+Date.now(),uid:String(currentUser.uid||p.uid),name:currentUser.name||p.name,title:title,details:details,attachments:files,createdAt:new Date().toISOString(),date:today(),time:now(),status:'Queued'};var all=emergencyReports();all.push(row);applyState({anrem_emergency_reports:all});var q=emergencyQueue();q.push(row);applyState({anrem_emergency_queue:q});var synced=await syncEmergencyQueue();toast(synced?'Emergency report submitted to Admin.':'Emergency report saved on this device and queued for sync.');emergencyPage()}catch(e){toast(e.message||'Emergency report not submitted')}};
  $('main').querySelectorAll('[data-er-edit]').forEach(function(b){b.onclick=async function(){var row=emergencyReports().find(function(x){return String(x.id)===b.getAttribute('data-er-edit')});if(!row)return;var title=prompt('Edit title:',row.title||'');if(title===null)return;var details=prompt('Edit details:',row.details||'');if(details===null)return;await emergencyChange(row.id,'PATCH',{title:title,details:details})}});
  $('main').querySelectorAll('[data-er-delete]').forEach(function(b){b.onclick=function(){if(confirm('Delete this emergency report?'))emergencyChange(b.getAttribute('data-er-delete'),'DELETE')}});
 }
@@ -287,7 +291,7 @@ function leavePage(){
   var id=b.getAttribute('data-lv-cancel');if(!confirm('Cancel this pending leave request?'))return;
   try{var res=await fetch(API+'/api/leave/'+encodeURIComponent(id),{method:'PATCH',headers:headers(),body:JSON.stringify({action:'cancel'})});var x=await res.json();if(!res.ok)throw new Error(x.error||'Unable to cancel request');applyState(x.state);toast('Leave request cancelled.');leavePage()}catch(e){toast(e.message||'Unable to cancel request')}
  }});
- $('lvSubmit').onclick=async function(){var type=$('lvType').value,start=$('lvStart').value,end=$('lvEnd').value,reason=$('lvReason').value.trim();if(!type||!start||!end||!reason)return toast('Complete the leave type, dates and reason.');if(end<start)return toast('End date cannot be earlier than start date.');var attachment=null,f=$('lvFile').files&&$('lvFile').files[0];if(f){try{attachment=await fileData(f,2*1024*1024)}catch(e){return toast(e.message)}}var row={id:'ANREM-LV-'+Date.now()+'-'+Math.random().toString(36).slice(2,7),uid:p.uid,name:p.name,staffId:p.uid,leaveType:type,startDate:start,endDate:end,reason:reason,contact:$('lvContact').value.trim(),attachment:attachment,createdAt:new Date().toISOString(),status:'Pending',adminComment:'',offlineCreated:!navigator.onLine};var all=leaveRequests();all.push(row);applyState({anrem_leave_requests:all});if(!navigator.onLine){markPending('leave');toast('Leave request saved on this device and queued for Admin sync.');leavePage();return}try{var res=await fetch(API+'/api/snapshot/anrem_leave_requests',{method:'POST',headers:headers(),body:JSON.stringify({value:all})});var x=await res.json();if(!res.ok)throw new Error(x.error||'Unable to submit leave request');applyState(x.state);clearPending('leave');toast('Leave request submitted to Admin.');leavePage()}catch(e){markPending('leave');toast('Leave request saved locally and queued for Admin sync.');leavePage()}}
+ $('lvSubmit').onclick=async function(){var type=$('lvType').value,start=$('lvStart').value,end=$('lvEnd').value,reason=$('lvReason').value.trim();if(!type||!start||!end||!reason)return toast('Complete the leave type, dates and reason.');if(end<start)return toast('End date cannot be earlier than start date.');var attachment=null,f=$('lvFile').files&&$('lvFile').files[0];if(f){try{attachment=await fileData(f,2*1024*1024)}catch(e){return toast(e.message)}}var row={id:'ANREM-LV-'+Date.now()+'-'+Math.random().toString(36).slice(2,7),uid:String(currentUser.uid||p.uid),name:currentUser.name||p.name,staffId:String(currentUser.uid||p.uid),leaveType:type,startDate:start,endDate:end,reason:reason,contact:$('lvContact').value.trim(),attachment:attachment,createdAt:new Date().toISOString(),status:'Pending',adminComment:'',offlineCreated:!navigator.onLine};var all=leaveRequests();all.push(row);applyState({anrem_leave_requests:all});if(!navigator.onLine){markPending('leave');toast('Leave request saved on this device and queued for Admin sync.');leavePage();return}try{var res=await fetch(API+'/api/snapshot/anrem_leave_requests',{method:'POST',headers:headers(),body:JSON.stringify({value:all})});var x=await res.json();if(!res.ok)throw new Error(x.error||'Unable to submit leave request');applyState(x.state);clearPending('leave');toast('Leave request submitted to Admin.');leavePage()}catch(e){markPending('leave');toast('Leave request saved locally and queued for Admin sync.');leavePage()}}
 }
 
 function dailyPage(){
@@ -349,20 +353,45 @@ function weekKey(d){
 function pendingItems(){return stateGet('anrem_offline_pending',[])}
 function markPending(kind){var q=pendingItems();if(q.indexOf(kind)<0)q.push(kind);applyState({anrem_offline_pending:q});updateSyncBadge()}
 function clearPending(kind){var q=pendingItems().filter(function(x){return x!==kind});applyState({anrem_offline_pending:q});updateSyncBadge()}
-function updateSyncBadge(){var q=pendingItems();var el=$('offlineStatus');if(el)el.textContent=(navigator.onLine?'Online':'Offline')+(q.length?( ' • '+q.length+' item type(s) waiting to sync'):' • All synced')}
-async function syncPending(){if(!navigator.onLine||!token()||!pendingItems().length)return;try{
- var sr=await fetch(API+'/api/state',{headers:headers()});if(!sr.ok)throw new Error('state');var cloud=await sr.json();
- var localAtt=attendance(),cloudAtt=Array.isArray(cloud.rcs_att)?cloud.rcs_att:[];
- var key=function(r){return String(r.id||[r.uid,r.date,r.time,r.session].join('|'))};var seen={};cloudAtt.forEach(function(r){seen[key(r)]=1});localAtt.forEach(function(r){if(!seen[key(r)]){cloudAtt.push(r);seen[key(r)]=1}});
- var localRep=reports(),cloudRep=Array.isArray(cloud.anrem_daily_reports)?cloud.anrem_daily_reports:[];
- var rseen={};cloudRep.forEach(function(r){rseen[String(r.id)]=1});localRep.forEach(function(r){if(!rseen[String(r.id)]){cloudRep.push(r);rseen[String(r.id)]=1}});
- var localLeave=leaveRequests(),cloudLeave=Array.isArray(cloud.anrem_leave_requests)?cloud.anrem_leave_requests:[];
- var lseen={};cloudLeave.forEach(function(r){lseen[String(r.id)]=1});localLeave.forEach(function(r){if(!lseen[String(r.id)]){cloudLeave.push(r);lseen[String(r.id)]=1}});
- if(pendingItems().indexOf('attendance')>=0){var ar=await fetch(API+'/api/attendance/sync',{method:'POST',headers:headers(),body:JSON.stringify({value:cloudAtt})});if(!ar.ok)throw new Error('attendance');var ax=await ar.json();if(ax.state)applyState(ax.state);else applyState({rcs_att:cloudAtt});clearPending('attendance')}
- if(pendingItems().indexOf('reports')>=0){var rr=await fetch(API+'/api/snapshot/anrem_daily_reports',{method:'POST',headers:headers(),body:JSON.stringify({value:cloudRep})});if(!rr.ok)throw new Error('reports');var rx=await rr.json();if(rx.state)applyState(rx.state);else applyState({anrem_daily_reports:cloudRep});clearPending('reports')}
- if(pendingItems().indexOf('leave')>=0){var lr=await fetch(API+'/api/snapshot/anrem_leave_requests',{method:'POST',headers:headers(),body:JSON.stringify({value:cloudLeave})});if(!lr.ok)throw new Error('leave requests');var lx=await lr.json();if(lx.state)applyState(lx.state);else applyState({anrem_leave_requests:cloudLeave});clearPending('leave')}
- toast('Offline records synchronised');
- }catch(e){updateSyncBadge()}}
+function updateSyncBadge(){var q=pendingItems(),total=q.length+emergencyQueue().length;var el=$('offlineStatus');if(el)el.textContent=(navigator.onLine?'Online':'Offline')+(total?( ' • '+total+' item type(s) waiting to sync'):' • All synced')}
+async function syncPending(){
+ if(!navigator.onLine||!token()||!pendingItems().length)return;
+ try{
+  var uid=String(currentUser&&currentUser.uid||'');if(!uid)throw new Error('Staff identity is missing. Please sign in again.');
+  var sr=await fetch(API+'/api/state',{headers:headers()});if(!sr.ok)throw new Error('Unable to load cloud records');var cloud=await sr.json();
+  if(pendingItems().indexOf('attendance')>=0){
+   var localAtt=attendance(),cloudAtt=Array.isArray(cloud.rcs_att)?cloud.rcs_att:[];
+   var key=function(r){return String(r.id||r._eventId||[r.uid,r.date,r.time,r.session].join('|'))};
+   var seen={};cloudAtt.forEach(function(r){seen[key(r)]=1});localAtt.forEach(function(r){if(!seen[key(r)]){cloudAtt.push(r);seen[key(r)]=1}});
+   var ar=await fetch(API+'/api/attendance/sync',{method:'POST',headers:headers(),body:JSON.stringify({value:cloudAtt})});
+   var ax=await ar.json();if(!ar.ok)throw new Error(ax.error||'Attendance sync failed');
+   if(ax.state)applyState(ax.state);clearPending('attendance');
+  }
+  if(pendingItems().indexOf('reports')>=0){
+   var localRep=reports(),cloudRep=Array.isArray(cloud.anrem_daily_reports)?cloud.anrem_daily_reports:[];
+   var rseen={};cloudRep.forEach(function(r){rseen[String(r.id)]=1});
+   localRep.forEach(function(r){var copy=Object.assign({},r,{uid:uid,name:String(currentUser.name||r.name||'')});if(!rseen[String(copy.id)]){cloudRep.push(copy);rseen[String(copy.id)]=1}});
+   var rr=await fetch(API+'/api/snapshot/anrem_daily_reports',{method:'POST',headers:headers(),body:JSON.stringify({value:cloudRep})});
+   var rx=await rr.json();if(!rr.ok)throw new Error(rx.error||'Weekly report sync failed');
+   var savedRep=Array.isArray(rx.state&&rx.state.anrem_daily_reports)?rx.state.anrem_daily_reports:[];
+   var repIds=new Set(savedRep.map(function(x){return String(x.id)}));
+   if(localRep.some(function(x){return !repIds.has(String(x.id))}))throw new Error('The server did not confirm every weekly report. Your offline copy has been kept for retry.');
+   applyState(rx.state);clearPending('reports');
+  }
+  if(pendingItems().indexOf('leave')>=0){
+   var localLeave=leaveRequests(),cloudLeave=Array.isArray(cloud.anrem_leave_requests)?cloud.anrem_leave_requests:[];
+   var lseen={};cloudLeave.forEach(function(r){lseen[String(r.id)]=1});
+   localLeave.forEach(function(r){var copy=Object.assign({},r,{uid:uid,name:String(currentUser.name||r.name||''),staffId:uid});if(!lseen[String(copy.id)]){cloudLeave.push(copy);lseen[String(copy.id)]=1}});
+   var lr=await fetch(API+'/api/snapshot/anrem_leave_requests',{method:'POST',headers:headers(),body:JSON.stringify({value:cloudLeave})});
+   var lx=await lr.json();if(!lr.ok)throw new Error(lx.error||'Leave request sync failed');
+   var savedLeave=Array.isArray(lx.state&&lx.state.anrem_leave_requests)?lx.state.anrem_leave_requests:[];
+   var leaveIds=new Set(savedLeave.map(function(x){return String(x.id)}));
+   if(localLeave.some(function(x){return !leaveIds.has(String(x.id))}))throw new Error('The server did not confirm every leave request. Your offline copy has been kept for retry.');
+   applyState(lx.state);clearPending('leave');
+  }
+  toast('Offline records synchronised and verified.');
+ }catch(e){updateSyncBadge();toast(e.message||'Some offline records could not be synchronised. They remain queued.')}
+}
 window.addEventListener('online',function(){updateSyncBadge();syncPending();syncEmergencyQueue()});window.addEventListener('offline',updateSyncBadge);
 function showApp(){
  $('login').classList.add('hide');$('app').classList.remove('hide');
