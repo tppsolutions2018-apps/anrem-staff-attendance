@@ -169,6 +169,18 @@ function clockPage(){
   recent+='<tr><td>'+esc(r.date)+'</td><td>'+esc(r.time)+'</td><td>'+esc(r.session)+'</td><td><button type="button" data-att-edit="'+esc(r._eventId||r.id||'')+'">Edit</button> <button type="button" class="red" data-att-delete="'+esc(r._eventId||r.id||'')+'">Delete</button></td></tr>';
  });
  recent+='</table></div>';
+ var todayRows=rows.filter(function(r){return r.date===today()}),lastToday=todayRows.length?todayRows[todayRows.length-1]:null;
+ var clockedIn=!!lastToday&&lastToday.session==='Clock In';
+ $('main').innerHTML=
+  '<div class="card"><h2>Staff Clock In/Out</h2><p class="muted">Welcome, '+esc(p.name)+'. Record your attendance using the buttons below.</p>'+
+  '<div class="grid"><div><label>Current Date</label><h3>'+esc(today())+'</h3></div><div><label>Current Time</label><h3>'+esc(now())+'</h3></div></div>'+
+  '<div class="row"><button type="button" class="green" id="cin" '+(clockedIn?'disabled':'')+'>Clock In</button>'+
+  '<button type="button" class="red" id="cout" '+(!clockedIn?'disabled':'')+'>Clock Out</button></div>'+
+  '<p class="muted">'+(clockedIn?'You are currently clocked in. Please clock out when your shift ends.':(lastToday&&lastToday.session==='Clock Out'?'Your clock-out has been recorded for today.':'You have not clocked in today.'))+'</p></div>'+
+  '<div class="card" style="margin-top:12px"><h3>My Hours Report</h3><h2>'+fmt(total)+'</h2><p class="muted">Total completed hours recorded</p></div>'+
+  '<div class="card" style="margin-top:12px"><h3>Weekly Totals</h3>'+table('Week Starting',weekly,false)+'</div>'+
+  '<div class="card" style="margin-top:12px"><h3>Monthly Totals</h3>'+table('Month',monthly,true)+'</div>'+
+  '<div class="card" style="margin-top:12px"><h3>My Recent Attendance</h3>'+recent+'</div>';
  $('main').querySelectorAll('[data-att-edit]').forEach(function(b){b.onclick=async function(){
   var id=b.getAttribute('data-att-edit'),row=attendance().find(function(x){return String(x._eventId||x.id)===String(id)});if(!row)return toast('Attendance record not found.');
   var date=prompt('Correct date (YYYY-MM-DD):',row.date||today());if(date===null)return;
