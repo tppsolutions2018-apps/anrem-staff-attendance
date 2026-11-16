@@ -220,6 +220,10 @@ async function saveAttendance(a,msg){
  try{
   var r=await fetch(API+'/api/attendance/sync',{method:'POST',headers:headers(),body:JSON.stringify({value:a})});
   var x=await r.json();if(!r.ok)throw new Error(x.error||'Cloud save failed');
+  var saved=Array.isArray(x.state&&x.state.rcs_att)?x.state.rcs_att:[];
+  var keys={};saved.forEach(function(v){keys[String(v.id||v._eventId||[v.uid,v.date,v.time,v.session].join('|'))]=1});
+  var missing=a.filter(function(v){return String(v.uid||'')===String(currentUser.uid||'')&&!keys[String(v.id||v._eventId||[v.uid,v.date,v.time,v.session].join('|'))]});
+  if(missing.length)throw new Error('The server did not confirm the attendance record. It has been kept for retry.');
   applyState(x.state||{rcs_att:a});clearPending('attendance');toast(msg+' synced to Admin');clockPage();
  }catch(e){markPending('attendance');toast(msg+' saved on this device. Sync will retry when online.');clockPage()}
 }
@@ -366,6 +370,9 @@ async function syncPending(){
    var seen={};cloudAtt.forEach(function(r){seen[key(r)]=1});localAtt.forEach(function(r){if(!seen[key(r)]){cloudAtt.push(r);seen[key(r)]=1}});
    var ar=await fetch(API+'/api/attendance/sync',{method:'POST',headers:headers(),body:JSON.stringify({value:cloudAtt})});
    var ax=await ar.json();if(!ar.ok)throw new Error(ax.error||'Attendance sync failed');
+   var savedAtt=Array.isArray(ax.state&&ax.state.rcs_att)?ax.state.rcs_att:[];
+   var savedAttKeys={};savedAtt.forEach(function(r){savedAttKeys[key(r)]=1});
+   if(localAtt.some(function(r){return String(r.uid||'')===uid&&!savedAttKeys[key(r)]}))throw new Error('The server did not confirm every attendance record. Your offline copy has been kept for retry.');
    if(ax.state)applyState(ax.state);clearPending('attendance');
   }
   if(pendingItems().indexOf('reports')>=0){
